@@ -28,6 +28,11 @@ interface TrendChartProps {
   onTimeRangeChange?: (range: string) => void;
   /** 默认选中的传感器标签（存在则优先于"前 4 个"逻辑） */
   defaultTags?: string[];
+  /** 受控选中的传感器标签 */
+  selectedTags?: string[];
+  onSelectedTagsChange?: (tags: string[]) => void;
+  /** 全部可用传感器标签（来自 stats；数据按选中裁剪后仍可搜索/选择其它传感器） */
+  candidateTags?: string[];
 }
 
 // Grafana 调色板
@@ -90,7 +95,16 @@ function formatTimeRange(iso1: string, iso2: string): string {
   return `${fmt(iso1)} ~ ${fmt(iso2)}`;
 }
 
-export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onTimeRangeChange, defaultTags }: TrendChartProps) {
+export function TrendChart({
+  data,
+  sensorType,
+  timeRange: externalTimeRange,
+  onTimeRangeChange,
+  defaultTags,
+  selectedTags: controlledTags,
+  onSelectedTagsChange,
+  candidateTags,
+}: TrendChartProps) {
   const [internalTimeRange, setInternalTimeRange] = useState<string>('1h');
   const timeRange = externalTimeRange ?? internalTimeRange;
 
@@ -117,15 +131,19 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
   }, [data, sensorType]);
 
   const allTags = useMemo(() => {
+    // 优先使用全部候选标签（数据被按选中裁剪后仍可搜索/选择其它传感器）
+    if (candidateTags && candidateTags.length > 0) return candidateTags;
     const tags = new Set(filteredData.map((d) => d.sensor_tag));
     return Array.from(tags);
-  }, [filteredData]);
+  }, [filteredData, candidateTags]);
 
-  const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
+  const [internalSelected, setInternalSelected] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const isControlled = controlledTags !== undefined;
 
   const effectiveSelected = useMemo(() => {
-    if (selectedTags.size === 0) {
+    if (isControlled) return new Set(controlledTags);
+    if (internalSelected.size === 0) {
       // 默认：优先使用指定的默认标签（存在于数据中的子集）
       if (defaultTags && defaultTags.length > 0) {
         const matched = defaultTags.filter((t) => allTags.includes(t));
@@ -134,20 +152,24 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
       // 兜底：取前 4 个传感器
       if (allTags.length > 0) return new Set(allTags.slice(0, 4));
     }
-    return selectedTags;
-  }, [selectedTags, allTags, defaultTags]);
+    return internalSelected;
+  }, [isControlled, controlledTags, internalSelected, allTags, defaultTags]);
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags((prev) => {
-      const next = new Set(prev);
-      if (next.has(tag)) next.delete(tag);
-      else next.add(tag);
-      return next;
-    });
+  const commitSelection = (next: Set<string>) => {
+    if (isControlled) onSelectedTagsChange?.(Array.from(next));
+    else setInternalSelected(next);
   };
 
-  const selectAll = () => setSelectedTags(new Set(allTags));
-  const clearAll = () => setSelectedTags(new Set());
+  const toggleTag = (tag: string) => {
+    const next = new Set(effectiveSelected);
+    if (next.has(tag)) next.delete(tag);
+    else next.add(tag);
+    commitSelection(next);
+  };
+
+  // 与图表显示上限一致：全选最多选 12 个，避免一次查询过多传感器拖慢后端
+  const selectAll = () => commitSelection(new Set(allTags.slice(0, 12)));
+  const clearAll = () => commitSelection(new Set());
 
   // Filter tags by search
   const filteredTags = useMemo(() => {

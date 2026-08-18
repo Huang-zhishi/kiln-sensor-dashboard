@@ -9,7 +9,15 @@ function escapeSql(s: string): string {
   return s.replace(/'/g, "''").replace(/\\/g, '\\\\');
 }
 
-function buildHistoryQuery(timeRange: string, kiln_id: string, sensor_tag: string): string {
+// 趋势图一次最多查询的传感器数（与前端显示上限一致，防止拖垮后端）
+const MAX_TREND_SENSORS = 12;
+
+function buildHistoryQuery(
+  timeRange: string,
+  kiln_id: string,
+  sensor_tag: string,
+  sensors: string[] | null = null,
+): string {
   const timeMap: Record<string, string> = {
     '10m': '10m',
     '30m': '30m',
@@ -30,9 +38,28 @@ function buildHistoryQuery(timeRange: string, kiln_id: string, sensor_tag: strin
   };
   const interval = intervalMap[timeRange] || '1h';
 
+  // 显式空选择（sensors 参数存在但为空）：用户清空了趋势图，无需查库
+  if (sensors !== null && sensors.length === 0) {
+    return `
+      SELECT _wstart as ts, AVG(sensor_value) as sensor_value,
+             sensor_tag, device_id
+      FROM sensor_readings
+      WHERE 1=0
+      PARTITION BY sensor_tag, device_id
+      INTERVAL(${interval})
+    `;
+  }
+
   let whereClause = `ts > NOW() - ${hours}`;
   if (kiln_id) whereClause += ` AND sensor_tag LIKE '${escapeSql(kiln_id)}%'`;
-  if (sensor_tag) whereClause += ` AND sensor_tag = '${escapeSql(sensor_tag)}'`;
+  if (sensors !== null) {
+    // 精确按传感器列表查询（趋势图只拉选中传感器，避免全量 116 个的历史）
+    const limited = sensors.slice(0, MAX_TREND_SENSORS);
+    const list = limited.map((s) => `'${escapeSql(s)}'`).join(',');
+    whereClause += ` AND sensor_tag IN (${list})`;
+  } else if (sensor_tag) {
+    whereClause += ` AND sensor_tag = '${escapeSql(sensor_tag)}'`;
+  }
 
   return `
     SELECT _wstart as ts, AVG(sensor_value) as sensor_value,
@@ -50,6 +77,11 @@ export async function GET(request: Request) {
   const sensor_tag = searchParams.get('sensor_tag') || '';
   const device_id = searchParams.get('device_id') || '';
   const timeRange = searchParams.get('time_range') || '12h';
+  // 逗号分隔的传感器列表（趋势图精确查询用）；null = 未传（兼容旧调用，查全部）
+  const sensorsParam = searchParams.get('sensors');
+  const sensors: string[] | null = sensorsParam === null
+    ? null
+    : sensorsParam.split(',').map((s) => s.trim()).filter(Boolean);
 
   try {
     // 并行执行查询，stats 使用缓存
@@ -78,8 +110,12 @@ export async function GET(request: Request) {
         GROUP BY sensor_tag, device_id
       `, CACHE_TTL.stats),
 
-      // 3. 历史趋势查询（不缓存，实时）
-      query(buildHistoryQuery(timeRange, kiln_id, sensor_tag)),
+      // 3. 历史趋势查询（精确到选中传感器；缓存 60 秒避免轮询重复拖库）
+      queryWithCache(
+        `history:${timeRange}:${kiln_id}:${sensors === null ? '*' : sensors.join('|')}`,
+        buildHistoryQuery(timeRange, kiln_id, sensor_tag, sensors),
+        CACHE_TTL.history,
+      ),
     ]);
 
     // 解析最新数据
@@ -105,7 +141,7 @@ export async function GET(request: Request) {
     const totalRecords = statsRows.reduce((sum, r) => sum + Number(r.total || 0), 0);
 
     // 解析历史数据
-    const historyData = toRows(historyResult).map((r) => ({
+    const historyData = (historyResult as Record<string, unknown>[]).map((r) => ({
       device_id: r.device_id,
       kiln_id: extractKilnId(String(r.sensor_tag || '')),
       sensor_tag: r.sensor_tag,

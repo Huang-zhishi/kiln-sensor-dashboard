@@ -51,6 +51,8 @@ export default function DashboardPage() {
     kiln_id: '',
   });
   const [timeRange, setTimeRange] = useState('1h');
+  // 趋势图选中的传感器（受控状态，联动 API 精确查询）
+  const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>(DEFAULT_TREND_TAGS);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -58,6 +60,8 @@ export default function DashboardPage() {
       const params = new URLSearchParams();
       params.set('time_range', timeRange);
       if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
+      // 趋势图只请求选中的传感器历史；空选择时显式传空，避免回退全量查询拖慢后端
+      params.set('sensors', selectedTrendTags.join(','));
 
       const res = await apiFetch(`/api/dashboard?${params}`);
       const json = await res.json();
@@ -71,7 +75,7 @@ export default function DashboardPage() {
     }
     setLastUpdate(new Date());
     setLoading(false);
-  }, [filters, timeRange]);
+  }, [filters, timeRange, selectedTrendTags]);
 
   useEffect(() => {
     fetchAll();
@@ -112,6 +116,9 @@ export default function DashboardPage() {
               timeRange={timeRange}
               onTimeRangeChange={setTimeRange}
               defaultTags={DEFAULT_TREND_TAGS}
+              selectedTags={selectedTrendTags}
+              onSelectedTagsChange={setSelectedTrendTags}
+              candidateTags={stats?.sensorTags.map((t) => t.sensor_tag) || []}
             />
           </div>
 
