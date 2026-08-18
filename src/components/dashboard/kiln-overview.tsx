@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { classifySensor } from '@/lib/sensor-classifier';
 
 interface SensorData {
   device_id: string;
@@ -26,94 +27,113 @@ interface KilnOverviewProps {
   stats: StatsData | null;
 }
 
+interface KilnInfo {
+  kiln_id: string;
+  deviceCount: number;
+  sensorCount: number;
+  avgTemp: number | null;
+  avgPressure: number | null;
+}
+
+// 每个窑体提取关键指标：平均温度 / 平均压力（来自 stats 聚合数据）
+function buildKilnInfos(data: SensorData[], stats: StatsData | null): KilnInfo[] {
+  const kilns = new Map<string, KilnInfo>();
+
+  data.forEach((d) => {
+    if (!kilns.has(d.kiln_id)) {
+      kilns.set(d.kiln_id, {
+        kiln_id: d.kiln_id,
+        deviceCount: 0,
+        sensorCount: 0,
+        avgTemp: null,
+        avgPressure: null,
+      });
+    }
+  });
+
+  const devices = new Map<string, Set<string>>();
+  const sensorTags = new Map<string, Set<string>>();
+  data.forEach((d) => {
+    if (!devices.has(d.kiln_id)) devices.set(d.kiln_id, new Set());
+    if (!sensorTags.has(d.kiln_id)) sensorTags.set(d.kiln_id, new Set());
+    devices.get(d.kiln_id)!.add(d.device_id);
+    sensorTags.get(d.kiln_id)!.add(d.sensor_tag);
+  });
+
+  const avgByKiln: Record<string, { temp: number[]; pressure: number[] }> = {};
+  (stats?.stats || []).forEach((s) => {
+    const type = classifySensor(s.sensor_tag);
+    if (!avgByKiln[s.kiln_id]) avgByKiln[s.kiln_id] = { temp: [], pressure: [] };
+    if (type === '温度') avgByKiln[s.kiln_id].temp.push(Number(s.avg_value) || 0);
+    if (type === '压力') avgByKiln[s.kiln_id].pressure.push(Number(s.avg_value) || 0);
+  });
+
+  return Array.from(kilns.values()).map((k) => ({
+    ...k,
+    deviceCount: devices.get(k.kiln_id)?.size || 0,
+    sensorCount: sensorTags.get(k.kiln_id)?.size || 0,
+    avgTemp: avgByKiln[k.kiln_id]?.temp.length
+      ? avgByKiln[k.kiln_id].temp.reduce((a, b) => a + b, 0) / avgByKiln[k.kiln_id].temp.length
+      : null,
+    avgPressure: avgByKiln[k.kiln_id]?.pressure.length
+      ? avgByKiln[k.kiln_id].pressure.reduce((a, b) => a + b, 0) / avgByKiln[k.kiln_id].pressure.length
+      : null,
+  }));
+}
+
 export function KilnOverview({ data, stats }: KilnOverviewProps) {
-  const kilnData = useMemo(() => {
-    const kilns = new Map<string, {
-      kiln_id: string;
-      sensors: SensorData[];
-      devices: Set<string>;
-      deviceCount: number;
-    }>();
-
-    data.forEach((d) => {
-      if (!kilns.has(d.kiln_id)) {
-        kilns.set(d.kiln_id, { kiln_id: d.kiln_id, sensors: [], devices: new Set(), deviceCount: 0 });
-      }
-      const kiln = kilns.get(d.kiln_id)!;
-      kiln.sensors.push(d);
-      kiln.devices.add(d.device_id);
-      kiln.deviceCount = kiln.devices.size;
-    });
-
-    return Array.from(kilns.values());
-  }, [data]);
-
-  const getStats = (kilnId: string) => {
-    if (!stats) return [];
-    return stats.stats.filter((s) => s.kiln_id === kilnId);
-  };
+  const kilns = useMemo(() => buildKilnInfos(data, stats), [data, stats]);
 
   return (
-    <div className="panel h-full">
-      <div className="panel-title">窑体概览</div>
-      <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
-        {kilnData.length === 0 ? (
+    <div className="panel h-full flex flex-col">
+      <div className="panel-title">
+        窑体概览
+        <span className="ml-auto text-xs text-muted-foreground font-normal normal-case">
+          {kilns.length} 座
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        {kilns.length === 0 ? (
           <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             暂无窑体数据
           </div>
         ) : (
-          kilnData.map((kiln) => {
-            const kilnStats = getStats(kiln.kiln_id);
-            return (
-              <div
-                key={kiln.kiln_id}
-                className="rounded p-3"
-                style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(204,204,220,0.1)',
-                }}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="status-dot online" />
-                    <span className="text-sm font-semibold text-foreground">{kiln.kiln_id}</span>
+          kilns.map((kiln) => (
+            <div
+              key={kiln.kiln_id}
+              className="rounded p-3"
+              style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(204,204,220,0.1)',
+              }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="status-dot online" />
+                  <span className="text-sm font-semibold text-foreground">{kiln.kiln_id}</span>
+                </div>
+                <span className="text-xs text-muted-foreground">
+                  {kiln.deviceCount} 台 · {kiln.sensorCount} 传感器
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div className="text-[10px] text-muted-foreground">平均温度</div>
+                  <div className="text-sm font-mono font-bold text-foreground">
+                    {kiln.avgTemp !== null ? kiln.avgTemp.toFixed(1) : '--'}
+                    <span className="text-[10px] text-muted-foreground font-normal"> °C</span>
                   </div>
-                  <span className="text-xs text-muted-foreground">{kiln.deviceCount} 台设备</span>
                 </div>
-
-                {/* Stats grid */}
-                <div className="grid grid-cols-2 gap-2">
-                  {kilnStats.slice(0, 4).map((s) => (
-                    <div key={s.sensor_tag} className="text-center p-2 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                      <div className="text-[10px] text-muted-foreground truncate">{s.sensor_tag}</div>
-                      <div className="text-sm font-mono font-bold text-foreground">
-                        {(Number(s.avg_value) || 0).toFixed(1)}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground opacity-70">
-                        {(Number(s.min_value) || 0).toFixed(1)} ~ {(Number(s.max_value) || 0).toFixed(1)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Sensor list */}
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {kiln.sensors.map((s) => (
-                    <span
-                      key={`${s.device_id}-${s.sensor_tag}`}
-                      className="text-[10px] px-1.5 py-0.5 rounded font-mono"
-                      style={{
-                        background: 'rgba(255,255,255,0.03)',
-                        color: '#a1a1a1',
-                      }}
-                    >
-                      {s.sensor_tag}: {(Number(s.sensor_value) || 0).toFixed(1)}
-                    </span>
-                  ))}
+                <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                  <div className="text-[10px] text-muted-foreground">平均压力</div>
+                  <div className="text-sm font-mono font-bold text-foreground">
+                    {kiln.avgPressure !== null ? kiln.avgPressure.toFixed(1) : '--'}
+                    <span className="text-[10px] text-muted-foreground font-normal"> kPa</span>
+                  </div>
                 </div>
               </div>
-            );
-          })
+            </div>
+          ))
         )}
       </div>
     </div>

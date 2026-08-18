@@ -7,8 +7,7 @@ import { StatCards } from '@/components/dashboard/stat-cards';
 import { TrendChart } from '@/components/dashboard/trend-chart';
 import { KilnOverview } from '@/components/dashboard/kiln-overview';
 import { DataTable } from '@/components/dashboard/data-table';
-import { SensorGauge } from '@/components/dashboard/sensor-gauge';
-import { classifySensor, SENSOR_TYPES } from '@/lib/sensor-classifier';
+import { AlarmList } from '@/components/dashboard/alarm-list';
 import { apiFetch } from '@/lib/api-client';
 
 interface SensorData {
@@ -91,29 +90,26 @@ export default function DashboardPage() {
 
         <StatCards data={latestData} stats={stats} />
 
+        {/* 三段式布局：左窑体概览 / 中趋势图(黄金区) / 右告警列表 */}
         <div className="grid grid-cols-12 gap-3">
-          {/* Left: Trend Chart */}
-          <div className="col-span-12 lg:col-span-8">
-            <TrendChart data={historyData} timeRange={timeRange} onTimeRangeChange={setTimeRange} />
-          </div>
-
-          {/* Right: Sensor Gauges */}
-          <div className="col-span-12 lg:col-span-4">
-            <SensorGauge data={latestData} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-12 gap-3">
-          {/* Kiln Overview */}
-          <div className="col-span-12 lg:col-span-5">
+          {/* Left: Kiln Overview */}
+          <div className="col-span-12 lg:col-span-3">
             <KilnOverview data={latestData} stats={stats} />
           </div>
 
-          {/* Data Table */}
-          <div className="col-span-12 lg:col-span-7">
-            <DataTable data={latestData} />
+          {/* Center: Trend Chart (golden area) */}
+          <div className="col-span-12 lg:col-span-6">
+            <TrendChart data={historyData} timeRange={timeRange} onTimeRangeChange={setTimeRange} />
+          </div>
+
+          {/* Right: Alarms */}
+          <div className="col-span-12 lg:col-span-3">
+            <AlarmList data={latestData} />
           </div>
         </div>
+
+        {/* Bottom: Real-time data table */}
+        <DataTable data={latestData} />
       </div>
     </div>
   );

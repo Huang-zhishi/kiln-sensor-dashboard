@@ -30,6 +30,22 @@ export const SENSOR_TYPES: SensorType[] = [
   '成分检测', 'pH值', '设备状态', '其他'
 ];
 
+export type SensorLevel = 'normal' | 'warning' | 'danger';
+
+// 阈值语义判断：温度/压力超限时返回告警级别（与仪表盘/表格/告警列表共用）
+export function getSensorLevel(tag: string, value: number): SensorLevel {
+  const lower = tag.toLowerCase();
+  if (lower.includes('temp') || lower.includes('温度')) {
+    if (value > 800) return 'danger';
+    if (value > 500) return 'warning';
+  }
+  if (lower.includes('pressure') || lower.includes('压力')) {
+    if (value > 100) return 'danger';
+    if (value > 60) return 'warning';
+  }
+  return 'normal';
+}
+
 // 传感器类型 -> 显示单位
 export const UNIT_MAP: Record<SensorType, string> = {
   '温度': '°C',
