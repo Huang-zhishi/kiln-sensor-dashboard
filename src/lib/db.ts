@@ -10,7 +10,7 @@ const BASE_URL = `http://${TDENGINE_HOST}:${TDENGINE_PORT}/rest/sql/${TDENGINE_D
 const AUTH_HEADER = 'Basic ' + Buffer.from(`${TDENGINE_USER}:${TDENGINE_PASSWORD}`).toString('base64');
 
 // 缓存配置
-const CACHE_TTL = {
+export const CACHE_TTL = {
   stats: 15000,      // 15 秒
   latest: 10000,     // 10 秒
   history: 60000,    // 60 秒
@@ -23,10 +23,10 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
-function getCached<T>(key: string): T | null {
+function getCached<T>(key: string, ttl: number): T | null {
   const entry = cache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.timestamp > CACHE_TTL.latest) {
+  if (Date.now() - entry.timestamp > ttl) {
     cache.delete(key);
     return null;
   }
@@ -77,10 +77,13 @@ export async function query(sql: string): Promise<TDengineResult> {
 
 /**
  * 带缓存的查询函数
+ * @param ttl 缓存有效期（毫秒），默认 10 秒
  */
-export async function queryWithCache<T>(cacheKey: string, sql: string): Promise<T> {
+export async function queryWithCache<T>(cacheKey: string, sql: string, ttl?: number): Promise<T> {
+  const ttlMs = ttl ?? CACHE_TTL.latest;
+
   // 尝试从缓存获取
-  const cached = getCached<T>(cacheKey);
+  const cached = getCached<T>(cacheKey, ttlMs);
   if (cached) {
     return cached;
   }

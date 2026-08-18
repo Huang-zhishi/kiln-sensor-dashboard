@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { apiFetch } from '@/lib/api-client';
 
 interface EditSystem {
   id: string;
@@ -80,7 +81,7 @@ export default function ImportPageContent() {
       formData.append('apiBaseUrl', apiBaseUrl);
 
       const method = editId ? 'PUT' : 'POST';
-      const res = await fetch('/api/process/upload', { method, body: formData });
+      const res = await apiFetch('/api/process/upload', { method, body: formData });
       const json = await res.json();
 
       if (!json.success) {

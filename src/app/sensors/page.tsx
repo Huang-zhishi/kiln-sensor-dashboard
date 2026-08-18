@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { CategoryNav } from '@/components/sensors/category-nav';
 import { SensorChart } from '@/components/sensors/sensor-chart';
 import { LazyLoad } from '@/components/sensors/lazy-load';
-import { classifySensor, type SensorType } from '@/lib/sensor-classifier';
+import { classifySensor, UNIT_MAP, type SensorType } from '@/lib/sensor-classifier';
+import { apiFetch } from '@/lib/api-client';
 
 interface SensorReading {
   device_id: string;
@@ -23,19 +24,7 @@ interface SensorHistory {
   reported_at: string;
 }
 
-// 单位映射
-const UNIT_MAP: Record<SensorType, string> = {
-  '温度': '°C',
-  '压力': 'kPa',
-  '流量': 'm³/h',
-  '阀位': '%',
-  '液位': 'm',
-  '成分检测': '%',
-  'pH值': 'pH',
-  '设备状态': '',
-  '其他': '',
-};
-
+// 单位映射（从公共模块导入，见 sensor-classifier.ts）
 export default function SensorsPage() {
   const [latestData, setLatestData] = useState<SensorReading[]>([]);
   const [historyData, setHistoryData] = useState<Record<string, SensorHistory[]>>({});
@@ -44,20 +33,26 @@ export default function SensorsPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  // 获取数据（无感更新）
-  const fetchData = useCallback(async () => {
+  // 获取最新数据（无感更新，15 秒轮询）
+  const fetchLatest = useCallback(async () => {
     try {
-      // 并行请求最新数据和历史数据
-      const [latestRes, historyRes] = await Promise.all([
-        fetch('/api/sensors/latest'),
-        fetch(`/api/sensors/history?time_range=${timeRange}`),
-      ]);
-
+      const latestRes = await apiFetch('/api/sensors/latest');
       const latestJson = await latestRes.json();
       if (latestJson.success) {
         setLatestData(latestJson.data);
       }
+      setLastUpdate(new Date());
+      setLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch data:', err);
+      setLoading(false);
+    }
+  }, []);
 
+  // 获取历史数据（历史趋势稳定，仅在时间范围变化或首次加载时获取，避免每次轮询全量拉取）
+  const fetchHistory = useCallback(async () => {
+    try {
+      const historyRes = await apiFetch(`/api/sensors/history?time_range=${timeRange}`);
       const historyJson = await historyRes.json();
       if (historyJson.success) {
         // 按传感器分组
@@ -70,20 +65,21 @@ export default function SensorsPage() {
         });
         setHistoryData(grouped);
       }
-
-      setLastUpdate(new Date());
-      setLoading(false);
     } catch (err) {
-      console.error('Failed to fetch data:', err);
-      setLoading(false);
+      console.error('Failed to fetch history:', err);
     }
   }, [timeRange]);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 15000);
+    fetchLatest();
+    const interval = setInterval(fetchLatest, 15000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchLatest]);
+
+  // 时间范围变化时重新拉取历史
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   // 计算每种类型的传感器数量
   const typeCounts = useMemo(() => {

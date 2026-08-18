@@ -29,6 +29,28 @@ export const SENSOR_TYPES: SensorType[] = [
   '成分检测', 'pH值', '设备状态', '其他'
 ];
 
+// 传感器类型 -> 显示单位
+export const UNIT_MAP: Record<SensorType, string> = {
+  '温度': '°C',
+  '压力': 'kPa',
+  '流量': 'm³/h',
+  '阀位': '%',
+  '液位': 'm',
+  '成分检测': '%',
+  'pH值': 'pH',
+  '设备状态': '',
+  '其他': '',
+};
+
+/**
+ * 从传感器名称提取窑号，如 "1#窑体温度TI_206A" -> "1#"
+ */
+export function extractKilnId(sensorTag: string): string {
+  if (!sensorTag) return '';
+  const match = sensorTag.match(/^(\d+#)/);
+  return match ? match[1] : '';
+}
+
 // 分类规则：关键词 -> 类型
 const CLASSIFICATION_RULES: Array<{ keywords: string[]; type: SensorType }> = [
   {

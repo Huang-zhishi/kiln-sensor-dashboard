@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query, toRows } from '@/lib/db';
+import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +31,4 @@ export async function GET() {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
-}
-
-function extractKilnId(sensorTag: string): string {
-  const match = sensorTag.match(/^(\d+#)/);
-  return match ? match[1] : '';
 }

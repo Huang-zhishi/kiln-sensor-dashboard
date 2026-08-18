@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { query, toRows, queryWithCache } from '@/lib/db';
+import { query, toRows, queryWithCache, CACHE_TTL } from '@/lib/db';
+import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
 
-function extractKilnId(sensorTag: string): string {
-  if (sensorTag.startsWith('1#')) return '1#';
-  if (sensorTag.startsWith('2#')) return '2#';
-  return '';
+// 标准 SQL 转义（TDengine 适用）：单引号双写 + 反斜杠转义
+function escapeSql(s: string): string {
+  return s.replace(/'/g, "''").replace(/\\/g, '\\\\');
 }
 
 function buildHistoryQuery(timeRange: string, kiln_id: string, sensor_tag: string): string {
@@ -31,8 +31,8 @@ function buildHistoryQuery(timeRange: string, kiln_id: string, sensor_tag: strin
   const interval = intervalMap[timeRange] || '1h';
 
   let whereClause = `ts > NOW() - ${hours}`;
-  if (kiln_id) whereClause += ` AND sensor_tag LIKE '${kiln_id}%'`;
-  if (sensor_tag) whereClause += ` AND sensor_tag = '${sensor_tag}'`;
+  if (kiln_id) whereClause += ` AND sensor_tag LIKE '${escapeSql(kiln_id)}%'`;
+  if (sensor_tag) whereClause += ` AND sensor_tag = '${escapeSql(sensor_tag)}'`;
 
   return `
     SELECT _wstart as ts, AVG(sensor_value) as sensor_value,
@@ -54,17 +54,17 @@ export async function GET(request: Request) {
   try {
     // 并行执行查询，stats 使用缓存
     const [latestResult, statsResult, historyResult] = await Promise.all([
-      // 1. 最新数据查询（带缓存，10 秒）
-      queryWithCache('latest', `
+      // 1. 最新数据查询（带缓存，10 秒；key 含筛选参数避免串数据）
+      queryWithCache(`latest:${device_id}`, `
         SELECT LAST(ts) as ts, LAST(sensor_value) as sensor_value,
                device_id, sensor_tag
         FROM sensor_readings
-        ${device_id ? `WHERE device_id = '${device_id}'` : ''}
+        ${device_id ? `WHERE device_id = '${escapeSql(device_id)}'` : ''}
         PARTITION BY device_id, sensor_tag
-      `),
+      `, CACHE_TTL.latest),
 
-      // 2. 统计数据查询（带缓存，30 秒）
-      queryWithCache('stats', `
+      // 2. 统计数据查询（带缓存，15 秒；key 含筛选参数避免串数据）
+      queryWithCache(`stats:${kiln_id}`, `
         SELECT
           COUNT(ts) as total,
           sensor_tag,
@@ -74,9 +74,9 @@ export async function GET(request: Request) {
           MAX(sensor_value) as max_val
         FROM sensor_readings
         WHERE ts > NOW() - 24h
-        ${kiln_id ? `AND sensor_tag LIKE '${kiln_id}%'` : ''}
+        ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
         GROUP BY sensor_tag, device_id
-      `),
+      `, CACHE_TTL.stats),
 
       // 3. 历史趋势查询（不缓存，实时）
       query(buildHistoryQuery(timeRange, kiln_id, sensor_tag)),

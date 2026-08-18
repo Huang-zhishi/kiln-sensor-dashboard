@@ -9,6 +9,7 @@ import { KilnOverview } from '@/components/dashboard/kiln-overview';
 import { DataTable } from '@/components/dashboard/data-table';
 import { SensorGauge } from '@/components/dashboard/sensor-gauge';
 import { classifySensor, SENSOR_TYPES } from '@/lib/sensor-classifier';
+import { apiFetch } from '@/lib/api-client';
 
 interface SensorData {
   device_id: string;
@@ -51,7 +52,7 @@ export default function DashboardPage() {
       params.set('time_range', timeRange);
       if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
 
-      const res = await fetch(`/api/dashboard?${params}`);
+      const res = await apiFetch(`/api/dashboard?${params}`);
       const json = await res.json();
       if (json.success) {
         setLatestData(json.data.latest);
@@ -69,7 +70,7 @@ export default function DashboardPage() {
     fetchAll();
   }, [fetchAll]);
 
-  // Auto refresh every 30 seconds
+  // Auto refresh every 15 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       fetchAll();

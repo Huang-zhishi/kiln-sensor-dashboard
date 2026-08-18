@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { apiFetch } from '@/lib/api-client';
 
 interface ProcessSystem {
   id: string;
@@ -36,7 +37,7 @@ export default function ProcessPage() {
     e.stopPropagation();
     if (!confirm('确定删除该工艺流程？')) return;
     try {
-      const res = await fetch('/api/process/systems', {
+      const res = await apiFetch('/api/process/systems', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
@@ -148,7 +149,7 @@ export default function ProcessPage() {
             className="absolute inset-0 w-full h-full border-0"
             style={{ background: '#0a0e1a' }}
             title={current.name}
-            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+            sandbox="allow-scripts allow-same-origin allow-forms"
           />
         )}
         {!current && (

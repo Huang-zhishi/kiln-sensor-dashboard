@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, toRows } from '@/lib/db';
+import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
     const conditions: string[] = [];
 
     if (kilnId) {
-      conditions.push(`device_id = '${escapeSql(kilnId)}'`);
+      conditions.push(`sensor_tag LIKE '${escapeSql(kilnId)}%'`);
     }
     if (deviceId) {
       conditions.push(`device_id = '${escapeSql(deviceId)}'`);
@@ -50,11 +51,5 @@ export async function GET(request: NextRequest) {
 }
 
 function escapeSql(s: string): string {
-  return s.replace(/'/g, "\\'");
-}
-
-function extractKilnId(sensorTag: string): string {
-  // Extract kiln ID from sensor tag like "1#窑体温度TI_206A" -> "1#"
-  const match = sensorTag.match(/^(\d+#)/);
-  return match ? match[1] : '';
+  return s.replace(/'/g, "''").replace(/\\/g, '\\\\');
 }

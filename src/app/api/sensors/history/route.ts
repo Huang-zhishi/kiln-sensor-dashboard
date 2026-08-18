@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, toRows } from '@/lib/db';
+import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (kilnId) {
-      conditions.push(`device_id = '${escapeSql(kilnId)}'`);
+      conditions.push(`sensor_tag LIKE '${escapeSql(kilnId)}%'`);
     }
     if (sensorTag) {
       conditions.push(`sensor_tag = '${escapeSql(sensorTag)}'`);
@@ -77,10 +78,4 @@ export async function GET(request: NextRequest) {
     console.error('History API error:', message);
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
-}
-
-function extractKilnId(sensorTag: string): string {
-  if (!sensorTag) return '';
-  const match = sensorTag.match(/^(\d+#)/);
-  return match ? match[1] : '';
 }

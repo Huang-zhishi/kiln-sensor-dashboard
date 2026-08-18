@@ -31,17 +31,18 @@ export function KilnOverview({ data, stats }: KilnOverviewProps) {
     const kilns = new Map<string, {
       kiln_id: string;
       sensors: SensorData[];
+      devices: Set<string>;
       deviceCount: number;
     }>();
 
     data.forEach((d) => {
       if (!kilns.has(d.kiln_id)) {
-        kilns.set(d.kiln_id, { kiln_id: d.kiln_id, sensors: [], deviceCount: 0 });
+        kilns.set(d.kiln_id, { kiln_id: d.kiln_id, sensors: [], devices: new Set(), deviceCount: 0 });
       }
       const kiln = kilns.get(d.kiln_id)!;
       kiln.sensors.push(d);
-      const devices = new Set(kiln.sensors.map((s) => s.device_id));
-      kiln.deviceCount = devices.size;
+      kiln.devices.add(d.device_id);
+      kiln.deviceCount = kiln.devices.size;
     });
 
     return Array.from(kilns.values());

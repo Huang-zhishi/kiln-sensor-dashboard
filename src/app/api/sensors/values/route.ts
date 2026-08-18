@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, toRows } from '@/lib/db';
-import { classifySensor } from '@/lib/sensor-classifier';
+import { classifySensor, extractKilnId, UNIT_MAP } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 10;
 
 /**
  * 传感器数值接口
@@ -45,18 +44,6 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get('type');
     const kilnId = searchParams.get('kiln_id');
     const limit = Math.min(Number(searchParams.get('limit')) || 100, 500);
-
-    const UNIT_MAP: Record<string, string> = {
-      '温度': '°C',
-      '压力': 'kPa',
-      '流量': 'm³/h',
-      '阀位': '%',
-      '液位': 'm',
-      '成分检测': '%',
-      'pH值': 'pH',
-      '设备状态': '',
-      '其他': '',
-    };
 
     // Get latest values for all sensors
     const sql = `
@@ -124,9 +111,4 @@ export async function GET(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
-}
-
-function extractKilnId(sensorTag: string): string {
-  const match = sensorTag.match(/^(\d+#)/);
-  return match ? match[1] : '';
 }

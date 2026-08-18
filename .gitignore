@@ -166,3 +166,6 @@ Desktop.ini
 
 # 本地适配：pnpm store 在项目内
 .pnpm-store/
+
+# 运行时上传的工艺流程图（运行期数据，不入库）
+public/imports/
