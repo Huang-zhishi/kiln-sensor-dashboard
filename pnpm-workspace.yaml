@@ -1,0 +1,3 @@
+# 本地适配（pnpm 10+ 配置位置）
+storeDir: .pnpm-store
+verifyDepsBeforeRun: false
