@@ -348,6 +348,10 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
                   color: '#e0e0e0',
                 }}
                 labelStyle={{ color: '#a1a1a1' }}
+                formatter={(value: number | string, name: string) => {
+                  const num = Number(value);
+                  return [isNaN(num) ? String(value) : num.toFixed(2), name];
+                }}
               />
               <Legend
                 wrapperStyle={{ fontSize: '10px', color: '#a1a1a1' }}
