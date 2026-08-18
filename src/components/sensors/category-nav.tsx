@@ -10,10 +10,10 @@ interface CategoryNavProps {
 
 export function CategoryNav({ counts, active, onChange }: CategoryNavProps) {
   return (
-    <div className="h-full flex flex-col bg-[#0f1729] border-r border-[rgba(0,212,255,0.15)]">
+    <div className="h-full flex flex-col bg-card border-r border-border">
       {/* 标题 */}
-      <div className="px-4 py-3 border-b border-[rgba(0,212,255,0.15)]">
-        <h2 className="text-sm font-bold text-[#e2e8f0] tracking-wider">传感器分类</h2>
+      <div className="px-4 py-3 border-b border-border">
+        <h2 className="text-sm font-semibold text-foreground tracking-wide">传感器分类</h2>
       </div>
 
       {/* 分类列表 */}
@@ -21,10 +21,10 @@ export function CategoryNav({ counts, active, onChange }: CategoryNavProps) {
         {/* 全部 */}
         <button
           onClick={() => onChange('all')}
-          className={`w-full px-4 py-2.5 text-left text-sm transition-colors flex items-center justify-between ${
+          className={`w-full px-4 py-2 text-left text-sm transition-colors flex items-center justify-between border-l-2 ${
             active === 'all'
-              ? 'bg-[rgba(0,212,255,0.15)] text-[#00d4ff] border-r-2 border-[#00d4ff]'
-              : 'text-[#94a3b8] hover:bg-[rgba(0,212,255,0.05)] hover:text-[#e2e8f0]'
+              ? 'bg-muted text-foreground border-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground border-transparent'
           }`}
         >
           <span>全部传感器</span>
@@ -45,10 +45,10 @@ export function CategoryNav({ counts, active, onChange }: CategoryNavProps) {
             <button
               key={type}
               onClick={() => onChange(type)}
-              className={`w-full px-4 py-2.5 text-left text-sm transition-colors flex items-center justify-between ${
+              className={`w-full px-4 py-2 text-left text-sm transition-colors flex items-center justify-between border-l-2 ${
                 isActive
-                  ? 'bg-[rgba(0,212,255,0.15)] text-[#00d4ff] border-r-2 border-[#00d4ff]'
-                  : 'text-[#94a3b8] hover:bg-[rgba(0,212,255,0.05)] hover:text-[#e2e8f0]'
+                  ? 'bg-muted text-foreground border-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground border-transparent'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -65,7 +65,7 @@ export function CategoryNav({ counts, active, onChange }: CategoryNavProps) {
       </div>
 
       {/* 底部统计 */}
-      <div className="px-4 py-3 border-t border-[rgba(0,212,255,0.15)] text-xs text-[#64748b]">
+      <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
         共 {Object.values(counts).reduce((a, b) => a + b, 0)} 个传感器
       </div>
     </div>

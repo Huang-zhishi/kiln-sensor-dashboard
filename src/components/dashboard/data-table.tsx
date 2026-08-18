@@ -32,13 +32,13 @@ export function DataTable({ data }: DataTableProps) {
     <div className="panel h-full">
       <div className="panel-title">
         实时数据列表
-        <span className="ml-auto text-xs text-slate-500 font-normal normal-case">
+        <span className="ml-auto text-xs text-muted-foreground font-normal normal-case">
           共 {data.length} 条
         </span>
       </div>
       <div className="overflow-auto max-h-[400px]">
         {data.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-slate-500 text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             暂无数据
           </div>
         ) : (
@@ -56,13 +56,13 @@ export function DataTable({ data }: DataTableProps) {
               {sortedData.map((row, idx) => (
                 <tr key={`${row.device_id}-${row.sensor_tag}-${idx}`}>
                   <td>
-                    <span className="text-slate-300">{row.kiln_id}</span>
+                    <span className="text-foreground">{row.kiln_id}</span>
                   </td>
                   <td>
-                    <span className="text-slate-400">{row.device_id}</span>
+                    <span className="text-muted-foreground">{row.device_id}</span>
                   </td>
                   <td>
-                    <span className="text-cyan-400">{row.sensor_tag}</span>
+                    <span className="text-muted-foreground">{row.sensor_tag}</span>
                   </td>
                   <td>
                     <span className="font-bold" style={{
@@ -72,7 +72,7 @@ export function DataTable({ data }: DataTableProps) {
                     </span>
                   </td>
                   <td>
-                    <span className="text-slate-500">
+                    <span className="text-muted-foreground">
                       {mounted ? formatDate(row.reported_at) : '--'}
                     </span>
                   </td>
@@ -89,9 +89,14 @@ export function DataTable({ data }: DataTableProps) {
 function getValueColor(tag: string, value: number): string {
   const lower = tag.toLowerCase();
   if (lower.includes('temp') || lower.includes('温度') || lower.includes('ti')) {
-    if (value > 800) return '#ef4444';
-    if (value > 500) return '#f59e0b';
-    return '#00d4ff';
+    if (value > 800) return '#f2495c';
+    if (value > 500) return '#fade2a';
+    return '#e0e0e0';
   }
-  return '#00d4ff';
+  if (lower.includes('pressure') || lower.includes('压力')) {
+    if (value > 100) return '#f2495c';
+    if (value > 60) return '#fade2a';
+    return '#e0e0e0';
+  }
+  return '#e0e0e0';
 }

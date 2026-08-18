@@ -32,7 +32,7 @@ export function LazyLoad({ children, className = '', threshold = 0.1 }: LazyLoad
 
   return (
     <div ref={ref} className={className}>
-      {isVisible ? children : <div className="h-[300px] bg-[#0f1729] rounded border border-[rgba(0,212,255,0.1)]" />}
+      {isVisible ? children : <div className="h-[300px] bg-card rounded border border-border" />}
     </div>
   );
 }

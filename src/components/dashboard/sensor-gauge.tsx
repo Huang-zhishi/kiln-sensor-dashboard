@@ -17,16 +17,16 @@ interface SensorGaugeProps {
 function getGaugeColor(value: number, tag: string): string {
   const lower = tag.toLowerCase();
   if (lower.includes('temp') || lower.includes('温度')) {
-    if (value > 800) return '#ef4444';
-    if (value > 500) return '#f59e0b';
-    return '#00d4ff';
+    if (value > 800) return '#f2495c';
+    if (value > 500) return '#fade2a';
+    return '#33a2e5';
   }
   if (lower.includes('pressure') || lower.includes('压力')) {
-    if (value > 100) return '#ef4444';
-    if (value > 60) return '#f59e0b';
-    return '#10b981';
+    if (value > 100) return '#f2495c';
+    if (value > 60) return '#fade2a';
+    return '#33a2e5';
   }
-  return '#00d4ff';
+  return '#33a2e5';
 }
 
 function GaugeItem({ tag, value, unit }: { tag: string; value: number; unit: string }) {
@@ -42,7 +42,7 @@ function GaugeItem({ tag, value, unit }: { tag: string; value: number; unit: str
           <circle
             cx="40" cy="40" r="34"
             fill="none"
-            stroke="rgba(255,255,255,0.05)"
+            stroke="rgba(204,204,220,0.12)"
             strokeWidth="6"
           />
           <circle
@@ -53,7 +53,6 @@ function GaugeItem({ tag, value, unit }: { tag: string; value: number; unit: str
             strokeLinecap="round"
             strokeDasharray={`${percentage * 2.136} 213.6`}
             style={{
-              filter: `drop-shadow(0 0 4px ${color}60)`,
               transition: 'stroke-dasharray 0.5s ease',
             }}
           />
@@ -61,14 +60,14 @@ function GaugeItem({ tag, value, unit }: { tag: string; value: number; unit: str
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span
             className="text-lg font-bold font-mono"
-            style={{ color, textShadow: `0 0 8px ${color}40` }}
+            style={{ color }}
           >
             {numValue.toFixed(1)}
           </span>
-          <span className="text-[10px] text-slate-500">{unit}</span>
+          <span className="text-[10px] text-muted-foreground">{unit}</span>
         </div>
       </div>
-      <span className="text-xs text-slate-400 text-center truncate w-full">{tag}</span>
+      <span className="text-xs text-muted-foreground text-center truncate w-full">{tag}</span>
     </div>
   );
 }
@@ -90,7 +89,7 @@ export function SensorGauge({ data }: SensorGaugeProps) {
       <div className="panel-title">传感器仪表</div>
       <div className="p-3">
         {gaugeData.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-slate-500 text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             暂无传感器数据
           </div>
         ) : (

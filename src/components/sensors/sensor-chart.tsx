@@ -25,7 +25,7 @@ interface SensorChartProps {
 }
 
 export function SensorChart({ name, type, data, unit }: SensorChartProps) {
-  const color = SENSOR_TYPE_COLORS[type] || '#00d4ff';
+  const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
 
   // 使用 useMemo 缓存计算结果，避免不必要的重计算
   const { formatTime, latestValue, yDomain, chartData } = useMemo(() => {
@@ -55,7 +55,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
   }, [data]);
 
   return (
-    <div className="bg-[#0f1729] rounded-lg border border-[rgba(0,212,255,0.15)] p-4 hover:border-[rgba(0,212,255,0.3)] transition-colors">
+    <div className="bg-card rounded border border-border p-4 hover:border-border-strong transition-colors">
       {/* 标题栏 */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -63,7 +63,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
             className="w-2 h-2 rounded-full"
             style={{ backgroundColor: color }}
           />
-          <h3 className="text-sm font-medium text-[#e2e8f0] truncate max-w-[200px]">
+          <h3 className="text-sm font-medium text-foreground truncate max-w-[200px]">
             {name}
           </h3>
         </div>
@@ -71,7 +71,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
           <div className="text-lg font-bold font-mono" style={{ color }}>
             {latestValue.toFixed(1)}
           </div>
-          <div className="text-xs text-[#64748b]">{unit}</div>
+          <div className="text-xs text-muted-foreground">{unit}</div>
         </div>
       </div>
 
@@ -81,26 +81,26 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
           <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
             <CartesianGrid
               strokeDasharray="3 3"
-              stroke="rgba(0,212,255,0.1)"
+              stroke="rgba(204,204,220,0.08)"
             />
             <XAxis
               dataKey="reported_at"
               tickFormatter={formatTime}
-              stroke="#64748b"
+              stroke="#8b8b8b"
               fontSize={10}
               interval="preserveStartEnd"
             />
             <YAxis
               domain={yDomain}
-              stroke="#64748b"
+              stroke="#8b8b8b"
               fontSize={10}
               width={40}
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: '#1e293b',
-                border: '1px solid rgba(0,212,255,0.3)',
-                borderRadius: '6px',
+                backgroundColor: '#1f2227',
+                border: '1px solid rgba(204,204,220,0.19)',
+                borderRadius: '3px',
                 fontSize: '12px',
               }}
               labelFormatter={(label) => `时间: ${formatTime(label)}`}
@@ -120,7 +120,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
       </div>
 
       {/* 底部信息 */}
-      <div className="flex items-center justify-between mt-2 pt-2 border-t border-[rgba(0,212,255,0.1)] text-xs text-[#64748b]">
+      <div className="flex items-center justify-between mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
         <span>数据点: {data.length}</span>
         <span>
           范围: {yDomain[0].toFixed(1)} ~ {yDomain[1].toFixed(1)}

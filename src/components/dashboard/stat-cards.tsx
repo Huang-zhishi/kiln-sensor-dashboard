@@ -41,53 +41,25 @@ export function StatCards({ data, stats }: StatCardsProps) {
     : '--';
 
   const cards = [
-    {
-      label: '数据总量',
-      value: totalRecords.toLocaleString(),
-      unit: '条',
-      color: '#00d4ff',
-    },
-    {
-      label: '在线窑体',
-      value: String(totalKilns),
-      unit: '座',
-      color: '#10b981',
-    },
-    {
-      label: '在线设备',
-      value: String(totalDevices),
-      unit: '台',
-      color: '#f59e0b',
-    },
-    {
-      label: '传感器数',
-      value: String(totalSensors),
-      unit: '个',
-      color: '#8b5cf6',
-    },
-    {
-      label: '平均温度',
-      value: avgTemp,
-      unit: '°C',
-      color: '#ef4444',
-    },
+    { label: '数据总量', value: totalRecords.toLocaleString(), unit: '条' },
+    { label: '在线窑体', value: String(totalKilns), unit: '座' },
+    { label: '在线设备', value: String(totalDevices), unit: '台' },
+    { label: '传感器数', value: String(totalSensors), unit: '个' },
+    { label: '平均温度', value: avgTemp, unit: '°C' },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
       {cards.map((card) => (
-        <div key={card.label} className="panel p-4">
-          <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">
+        <div key={card.label} className="panel px-4 py-3">
+          <div className="text-xs text-muted-foreground mb-1.5 truncate">
             {card.label}
           </div>
           <div className="flex items-baseline gap-1">
-            <span
-              className="text-3xl font-bold font-mono number-transition"
-              style={{ color: card.color, textShadow: `0 0 12px ${card.color}40` }}
-            >
+            <span className="text-3xl font-bold font-mono text-foreground number-transition leading-none">
               {card.value}
             </span>
-            <span className="text-xs text-slate-500">{card.unit}</span>
+            <span className="text-xs text-muted-foreground">{card.unit}</span>
           </div>
         </div>
       ))}

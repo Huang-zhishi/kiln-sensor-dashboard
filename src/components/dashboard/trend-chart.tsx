@@ -28,10 +28,11 @@ interface TrendChartProps {
   onTimeRangeChange?: (range: string) => void;
 }
 
+// Grafana 调色板
 const COLORS = [
-  '#00d4ff', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#a78bfa',
-  '#14b8a6', '#e879f9', '#38bdf8', '#facc15', '#fb923c', '#34d399',
+  '#5794f2', '#f2495c', '#ff9830', '#73bf69', '#33a2e5',
+  '#fade2a', '#b877d9', '#ffd166', '#e0752d', '#0ea5e9',
+  '#a7c7e7', '#c0a3e6', '#95de64', '#ff85c0', '#5cdbd3', '#d3adf7',
 ];
 
 // Get interval info from time range
@@ -216,7 +217,7 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
         <div className="flex items-center gap-2">
           <span>趋势曲线</span>
           {sensorType && (
-            <span className="text-xs font-normal normal-case" style={{ color: SENSOR_TYPE_COLORS[sensorType] || '#00d4ff' }}>
+            <span className="text-xs font-normal normal-case" style={{ color: SENSOR_TYPE_COLORS[sensorType] }}>
               {sensorType}
             </span>
           )}
@@ -228,8 +229,8 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
               onClick={() => handleTimeRangeChange(tr.value)}
               className={`px-2 py-0.5 text-xs rounded transition-colors ${
                 timeRange === tr.value
-                  ? 'bg-cyan-500/20 text-cyan-400'
-                  : 'text-slate-500 hover:text-slate-400'
+                  ? 'bg-primary/15 text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {tr.label}
@@ -238,7 +239,7 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
         </div>
       </div>
       {timeRangeStr && (
-        <div className="px-4 py-1 text-xs text-slate-500 border-b border-cyan-500/10">
+        <div className="px-4 py-1 text-xs text-muted-foreground border-b border-border">
           {timeRangeStr}
         </div>
       )}
@@ -247,29 +248,22 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
       {allTags.length > 0 && (
         <div className="px-4 pt-2 pb-1">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[11px] text-slate-500">选择传感器：</span>
+            <span className="text-[11px] text-muted-foreground">选择传感器：</span>
             <button onClick={selectAll}
-              className="text-[11px] px-1.5 py-0.5 rounded transition-colors"
-              style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>
+              className="text-[11px] px-1.5 py-0.5 rounded transition-colors bg-primary/15 text-primary hover:bg-primary/25">
               全选
             </button>
             <button onClick={clearAll}
-              className="text-[11px] px-1.5 py-0.5 rounded transition-colors"
-              style={{ background: 'rgba(255,255,255,0.05)', color: '#64748b' }}>
+              className="text-[11px] px-1.5 py-0.5 rounded transition-colors bg-card text-muted-foreground border border-border-strong hover:bg-card-hover">
               清空
             </button>
-            <span className="text-[11px] text-slate-500 ml-1">
+            <span className="text-[11px] text-muted-foreground ml-1">
               已选 {effectiveSelected.size} / {allTags.length}
             </span>
             <input
               type="text"
               placeholder="搜索..."
-              className="ml-auto text-xs px-2 py-0.5 rounded w-36 outline-none"
-              style={{
-                background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(0,212,255,0.15)',
-                color: '#e2e8f0',
-              }}
+              className="ml-auto text-xs px-2 py-0.5 rounded w-36 outline-none bg-card border border-border-strong text-foreground focus:border-primary transition-colors"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -287,9 +281,9 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
                     onClick={() => toggleTag(tag)}
                     className="text-[10px] px-2 py-0.5 rounded-full transition-all truncate max-w-48"
                     style={{
-                      background: isSelected ? `${COLORS[idx]}20` : 'rgba(255,255,255,0.03)',
-                      border: `1px solid ${isSelected ? COLORS[idx] + '60' : 'rgba(255,255,255,0.08)'}`,
-                      color: isSelected ? COLORS[idx] : '#64748b',
+                      background: isSelected ? `${COLORS[idx]}26` : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${isSelected ? COLORS[idx] + '66' : 'rgba(255,255,255,0.08)'}`,
+                      color: isSelected ? COLORS[idx] : '#a1a1a1',
                     }}
                   >
                     {tag}
@@ -299,7 +293,7 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
             ))}
           </div>
           {extraCount > 0 && (
-            <div className="text-[10px] text-slate-500 mt-1">
+            <div className="text-[10px] text-muted-foreground mt-1">
               还有 {extraCount} 个传感器未显示，请减少选择
             </div>
           )}
@@ -309,27 +303,27 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
       {/* Chart */}
       <div className="flex-1 min-h-0 px-2 pb-2">
         {chartData.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
             暂无数据
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(204,204,220,0.08)" />
               <XAxis
                 dataKey="time"
-                tick={{ fill: '#64748b', fontSize: 10 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
-                tickLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+                tick={{ fill: '#8b8b8b', fontSize: 10 }}
+                axisLine={{ stroke: 'rgba(204,204,220,0.15)' }}
+                tickLine={{ stroke: 'rgba(204,204,220,0.15)' }}
                 interval="preserveStartEnd"
                 angle={-20}
                 textAnchor="end"
                 height={40}
               />
               <YAxis
-                tick={{ fill: '#64748b', fontSize: 10 }}
-                axisLine={{ stroke: 'rgba(255,255,255,0.1)' }}
-                tickLine={{ stroke: 'rgba(255,255,255,0.1)' }}
+                tick={{ fill: '#8b8b8b', fontSize: 10 }}
+                axisLine={{ stroke: 'rgba(204,204,220,0.15)' }}
+                tickLine={{ stroke: 'rgba(204,204,220,0.15)' }}
                 width={50}
                 tickFormatter={(v: number) => {
                   if (typeof v !== 'number' || isNaN(v) || !isFinite(v)) return '';
@@ -340,16 +334,16 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
               />
               <Tooltip
                 contentStyle={{
-                  background: '#0f1729',
-                  border: '1px solid rgba(0,212,255,0.3)',
-                  borderRadius: '4px',
+                  background: '#1f2227',
+                  border: '1px solid rgba(204,204,220,0.19)',
+                  borderRadius: '3px',
                   fontSize: '11px',
-                  color: '#e2e8f0',
+                  color: '#e0e0e0',
                 }}
-                labelStyle={{ color: '#94a3b8' }}
+                labelStyle={{ color: '#a1a1a1' }}
               />
               <Legend
-                wrapperStyle={{ fontSize: '10px', color: '#94a3b8' }}
+                wrapperStyle={{ fontSize: '10px', color: '#a1a1a1' }}
                 iconType="line"
               />
               {displayTags.map((tag) => {

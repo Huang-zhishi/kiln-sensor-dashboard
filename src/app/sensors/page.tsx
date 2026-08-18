@@ -110,7 +110,7 @@ export default function SensorsPage() {
   ];
 
   return (
-    <div className="h-screen flex bg-[#0a0e1a] text-[#e2e8f0] overflow-hidden">
+    <div className="h-screen flex bg-background text-foreground overflow-hidden">
       {/* 左侧分类导航 */}
       <div className="w-[200px] flex-shrink-0">
         <CategoryNav
@@ -123,12 +123,12 @@ export default function SensorsPage() {
       {/* 右侧主内容区 */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* 顶部栏 */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-[rgba(0,212,255,0.15)] bg-[#0f1729]">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
           <div className="flex items-center gap-4">
             {/* 返回首页按钮 */}
             <Link
               href="/"
-              className="flex items-center gap-2 px-3 py-1.5 bg-[#1e293b] hover:bg-[#334155] border border-[rgba(0,212,255,0.2)] rounded text-sm text-[#e2e8f0] transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -136,10 +136,10 @@ export default function SensorsPage() {
               返回首页
             </Link>
 
-            <h1 className="text-lg font-bold text-[#e2e8f0]">
+            <h1 className="text-lg font-semibold text-foreground">
               {activeType === 'all' ? '全部传感器' : activeType}
             </h1>
-            <span className="text-sm text-[#64748b]">
+            <span className="text-sm text-muted-foreground">
               {filteredSensors.length} 个传感器
             </span>
           </div>
@@ -147,11 +147,11 @@ export default function SensorsPage() {
           <div className="flex items-center gap-4">
             {/* 时间范围选择 */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[#64748b]">时间范围:</span>
+              <span className="text-xs text-muted-foreground">时间范围:</span>
               <select
                 value={timeRange}
                 onChange={(e) => setTimeRange(e.target.value)}
-                className="bg-[#1e293b] border border-[rgba(0,212,255,0.2)] rounded px-2 py-1 text-xs text-[#e2e8f0] focus:outline-none focus:border-[#00d4ff]"
+                className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
               >
                 {timeRangeOptions.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -163,7 +163,7 @@ export default function SensorsPage() {
 
             {/* 最后更新时间 */}
             {lastUpdate && (
-              <span className="text-xs text-[#64748b]">
+              <span className="text-xs text-muted-foreground">
                 更新: {lastUpdate.toLocaleTimeString('zh-CN')}
               </span>
             )}
@@ -171,17 +171,17 @@ export default function SensorsPage() {
         </div>
 
         {/* 图表网格 */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-[#64748b]">加载中...</div>
+              <div className="text-muted-foreground">加载中...</div>
             </div>
           ) : filteredSensors.length === 0 ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-[#64748b]">暂无数据</div>
+              <div className="text-muted-foreground">暂无数据</div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {filteredSensors.map((sensor) => {
                 const sensorType = classifySensor(sensor.sensor_tag);
                 return (

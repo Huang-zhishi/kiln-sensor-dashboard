@@ -79,10 +79,10 @@ export default function DashboardPage() {
   }, [fetchAll]);
 
   return (
-    <div className="dashboard-bg">
+    <div className="min-h-screen bg-background">
       <DashboardHeader lastUpdate={lastUpdate} onRefresh={fetchAll} loading={loading} />
 
-      <div className="px-4 pb-6 space-y-4">
+      <div className="px-4 pb-6 space-y-3">
         <FilterBar
           filters={filters}
           onFilterChange={setFilters}
@@ -91,7 +91,7 @@ export default function DashboardPage() {
 
         <StatCards data={latestData} stats={stats} />
 
-        <div className="grid grid-cols-12 gap-4">
+        <div className="grid grid-cols-12 gap-3">
           {/* Left: Trend Chart */}
           <div className="col-span-12 lg:col-span-8">
             <TrendChart data={historyData} timeRange={timeRange} onTimeRangeChange={setTimeRange} />
@@ -103,7 +103,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-12 gap-4">
+        <div className="grid grid-cols-12 gap-3">
           {/* Kiln Overview */}
           <div className="col-span-12 lg:col-span-5">
             <KilnOverview data={latestData} stats={stats} />

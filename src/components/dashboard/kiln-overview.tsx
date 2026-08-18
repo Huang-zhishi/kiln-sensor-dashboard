@@ -58,7 +58,7 @@ export function KilnOverview({ data, stats }: KilnOverviewProps) {
       <div className="panel-title">窑体概览</div>
       <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
         {kilnData.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-slate-500 text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             暂无窑体数据
           </div>
         ) : (
@@ -69,27 +69,27 @@ export function KilnOverview({ data, stats }: KilnOverviewProps) {
                 key={kiln.kiln_id}
                 className="rounded p-3"
                 style={{
-                  background: 'rgba(0, 212, 255, 0.03)',
-                  border: '1px solid rgba(0, 212, 255, 0.08)',
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid rgba(204,204,220,0.1)',
                 }}
               >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400 glow-breathe" />
-                    <span className="text-sm font-bold text-slate-200">{kiln.kiln_id}</span>
+                    <span className="status-dot online" />
+                    <span className="text-sm font-semibold text-foreground">{kiln.kiln_id}</span>
                   </div>
-                  <span className="text-xs text-slate-500">{kiln.deviceCount} 台设备</span>
+                  <span className="text-xs text-muted-foreground">{kiln.deviceCount} 台设备</span>
                 </div>
 
                 {/* Stats grid */}
                 <div className="grid grid-cols-2 gap-2">
                   {kilnStats.slice(0, 4).map((s) => (
-                    <div key={s.sensor_tag} className="text-center p-2 rounded" style={{ background: 'rgba(0,0,0,0.2)' }}>
-                      <div className="text-[10px] text-slate-500 truncate">{s.sensor_tag}</div>
-                      <div className="text-sm font-mono font-bold text-cyan-400">
+                    <div key={s.sensor_tag} className="text-center p-2 rounded" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                      <div className="text-[10px] text-muted-foreground truncate">{s.sensor_tag}</div>
+                      <div className="text-sm font-mono font-bold text-foreground">
                         {(Number(s.avg_value) || 0).toFixed(1)}
                       </div>
-                      <div className="text-[10px] text-slate-600">
+                      <div className="text-[10px] text-muted-foreground opacity-70">
                         {(Number(s.min_value) || 0).toFixed(1)} ~ {(Number(s.max_value) || 0).toFixed(1)}
                       </div>
                     </div>
@@ -103,8 +103,8 @@ export function KilnOverview({ data, stats }: KilnOverviewProps) {
                       key={`${s.device_id}-${s.sensor_tag}`}
                       className="text-[10px] px-1.5 py-0.5 rounded font-mono"
                       style={{
-                        background: 'rgba(0, 212, 255, 0.08)',
-                        color: '#94a3b8',
+                        background: 'rgba(255,255,255,0.03)',
+                        color: '#a1a1a1',
                       }}
                     >
                       {s.sensor_tag}: {(Number(s.sensor_value) || 0).toFixed(1)}
