@@ -26,6 +26,8 @@ interface TrendChartProps {
   sensorType?: SensorType | null;
   timeRange?: string;
   onTimeRangeChange?: (range: string) => void;
+  /** 默认选中的传感器标签（存在则优先于"前 4 个"逻辑） */
+  defaultTags?: string[];
 }
 
 // Grafana 调色板
@@ -88,7 +90,7 @@ function formatTimeRange(iso1: string, iso2: string): string {
   return `${fmt(iso1)} ~ ${fmt(iso2)}`;
 }
 
-export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onTimeRangeChange }: TrendChartProps) {
+export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onTimeRangeChange, defaultTags }: TrendChartProps) {
   const [internalTimeRange, setInternalTimeRange] = useState<string>('1h');
   const timeRange = externalTimeRange ?? internalTimeRange;
 
@@ -123,12 +125,17 @@ export function TrendChart({ data, sensorType, timeRange: externalTimeRange, onT
   const [searchQuery, setSearchQuery] = useState('');
 
   const effectiveSelected = useMemo(() => {
-    if (selectedTags.size === 0 && allTags.length > 0) {
-      // Default: pick first 4 sensors of current type
-      return new Set(allTags.slice(0, 4));
+    if (selectedTags.size === 0) {
+      // 默认：优先使用指定的默认标签（存在于数据中的子集）
+      if (defaultTags && defaultTags.length > 0) {
+        const matched = defaultTags.filter((t) => allTags.includes(t));
+        if (matched.length > 0) return new Set(matched);
+      }
+      // 兜底：取前 4 个传感器
+      if (allTags.length > 0) return new Set(allTags.slice(0, 4));
     }
     return selectedTags;
-  }, [selectedTags, allTags]);
+  }, [selectedTags, allTags, defaultTags]);
 
   const toggleTag = (tag: string) => {
     setSelectedTags((prev) => {

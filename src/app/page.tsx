@@ -33,6 +33,14 @@ interface StatsData {
   totalRecords: number;
 }
 
+// 趋势曲线默认展示：1# 窑体温度传感器
+const DEFAULT_TREND_TAGS = [
+  '1#窑体温度TI_206A',
+  '1#窑体温度TI_206B',
+  '1#窑体温度TI_206F',
+  '1#窑体温度TI_206E',
+];
+
 export default function DashboardPage() {
   const [latestData, setLatestData] = useState<SensorData[]>([]);
   const [historyData, setHistoryData] = useState<SensorData[]>([]);
@@ -99,7 +107,12 @@ export default function DashboardPage() {
 
           {/* Center: Trend Chart (golden area) */}
           <div className="col-span-12 lg:col-span-6">
-            <TrendChart data={historyData} timeRange={timeRange} onTimeRangeChange={setTimeRange} />
+            <TrendChart
+              data={historyData}
+              timeRange={timeRange}
+              onTimeRangeChange={setTimeRange}
+              defaultTags={DEFAULT_TREND_TAGS}
+            />
           </div>
 
           {/* Right: Alarms */}
