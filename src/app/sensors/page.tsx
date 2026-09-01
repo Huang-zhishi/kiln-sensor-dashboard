@@ -1,12 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { CategoryNav } from '@/components/sensors/category-nav';
 import { SensorChart } from '@/components/sensors/sensor-chart';
 import { LazyLoad } from '@/components/sensors/lazy-load';
 import { classifySensor, UNIT_MAP, type SensorType } from '@/lib/sensor-classifier';
-import { apiFetch } from '@/lib/api-client';
 
 interface SensorReading {
   device_id: string;
@@ -33,63 +32,36 @@ export default function SensorsPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  // 获取最新数据（无感更新，15 秒轮询）
-  const fetchLatest = useCallback(async () => {
-    try {
-      const latestRes = await apiFetch('/api/sensors/latest');
-      const latestJson = await latestRes.json();
-      if (latestJson.success) {
-        setLatestData(latestJson.data);
+  // SSE 实时订阅：最新数据每 2s 推送，历史随服务端缓存（15s）自动刷新
+  // 相同 time_range 的观众共享一次服务端查询
+  useEffect(() => {
+    const es = new EventSource(`/api/stream?type=sensors&time_range=${timeRange}`);
+    es.onmessage = (e) => {
+      try {
+        const json = JSON.parse(e.data);
+        if (json.latest) {
+          setLatestData(json.latest);
+          // 按传感器分组历史数据
+          const grouped: Record<string, SensorHistory[]> = {};
+          (json.history as SensorHistory[]).forEach((item) => {
+            if (!grouped[item.sensor_tag]) {
+              grouped[item.sensor_tag] = [];
+            }
+            grouped[item.sensor_tag].push(item);
+          });
+          setHistoryData(grouped);
+          setLastUpdate(new Date());
+          setLoading(false);
+        }
+      } catch {
+        // 忽略无法解析的帧
       }
-      setLastUpdate(new Date());
-      setLoading(false);
-    } catch (err) {
-      console.error('Failed to fetch data:', err);
-      setLoading(false);
-    }
-  }, []);
-
-  // 获取历史数据（历史趋势稳定，仅在时间范围变化或首次加载时获取，避免每次轮询全量拉取）
-  const fetchHistory = useCallback(async () => {
-    try {
-      const historyRes = await apiFetch(`/api/sensors/history?time_range=${timeRange}`);
-      const historyJson = await historyRes.json();
-      if (historyJson.success) {
-        // 按传感器分组
-        const grouped: Record<string, SensorHistory[]> = {};
-        historyJson.data.forEach((item: SensorHistory) => {
-          if (!grouped[item.sensor_tag]) {
-            grouped[item.sensor_tag] = [];
-          }
-          grouped[item.sensor_tag].push(item);
-        });
-        setHistoryData(grouped);
-      }
-    } catch (err) {
-      console.error('Failed to fetch history:', err);
-    }
+    };
+    es.onerror = () => {
+      // EventSource 断线自动重连（retry: 3000）
+    };
+    return () => es.close();
   }, [timeRange]);
-
-  useEffect(() => {
-    fetchLatest();
-    // 30 秒轮询（页面不可见时暂停）
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchLatest();
-    }, 30000);
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') fetchLatest();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
-  }, [fetchLatest]);
-
-  // 时间范围变化时重新拉取历史
-  useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
 
   // 计算每种类型的传感器数量
   const typeCounts = useMemo(() => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { DashboardHeader } from '@/components/dashboard/header';
 import { FilterBar } from '@/components/dashboard/filter-bar';
 import { StatCards } from '@/components/dashboard/stat-cards';
@@ -8,7 +8,7 @@ import { TrendChart } from '@/components/dashboard/trend-chart';
 import { KilnOverview } from '@/components/dashboard/kiln-overview';
 import { DataTable } from '@/components/dashboard/data-table';
 import { AlarmList } from '@/components/dashboard/alarm-list';
-import { apiFetch } from '@/lib/api-client';
+import { ScreenScaler } from '@/components/dashboard/screen-scaler';
 
 interface SensorData {
   device_id: string;
@@ -54,52 +54,42 @@ export default function DashboardPage() {
   // 趋势图选中的传感器（受控状态，联动 API 精确查询）
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>(DEFAULT_TREND_TAGS);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.set('time_range', timeRange);
-      if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
-      // 趋势图只请求选中的传感器历史；空选择时显式传空，避免回退全量查询拖慢后端
-      params.set('sensors', selectedTrendTags.join(','));
+  // SSE 实时订阅：服务端单点查询 + 广播，相同筛选参数的观众共享一次查询
+  // connNonce 仅用于手动刷新时重建连接
+  const [connNonce, setConnNonce] = useState(0);
 
-      const res = await apiFetch(`/api/dashboard?${params}`);
-      const json = await res.json();
-      if (json.success) {
-        setLatestData(json.data.latest);
-        setHistoryData(json.data.history);
-        setStats(json.data.stats);
+  useEffect(() => {
+    const params = new URLSearchParams();
+    params.set('time_range', timeRange);
+    if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
+    // 趋势图只订阅选中的传感器历史；空选择时显式传空，避免回退全量查询
+    params.set('sensors', selectedTrendTags.join(','));
+
+    const es = new EventSource(`/api/stream?${params}`);
+    es.onmessage = (e) => {
+      try {
+        const json = JSON.parse(e.data);
+        setLatestData(json.latest);
+        setHistoryData(json.history);
+        setStats(json.stats);
+        setLastUpdate(new Date());
+        setLoading(false);
+      } catch {
+        // 忽略无法解析的帧
       }
-    } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-    }
-    setLastUpdate(new Date());
-    setLoading(false);
-  }, [filters, timeRange, selectedTrendTags]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
-
-  // Auto refresh every 30 seconds（页面不可见时暂停，节省服务器压力）
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') fetchAll();
-    }, 30000);
-    // 切回页面时立即刷新一次
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') fetchAll();
     };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
+    es.onerror = () => {
+      // EventSource 断线自动重连（retry: 3000）
     };
-  }, [fetchAll]);
+
+    return () => es.close();
+  }, [filters, timeRange, selectedTrendTags, connNonce]);
+
+  const handleRefresh = useMemo(() => () => setConnNonce((n) => n + 1), []);
 
   return (
-    <div className="min-h-screen bg-background">
-      <DashboardHeader lastUpdate={lastUpdate} onRefresh={fetchAll} loading={loading} />
+    <ScreenScaler>
+      <DashboardHeader lastUpdate={lastUpdate} onRefresh={handleRefresh} loading={loading} />
 
       <div className="px-4 pb-6 space-y-3">
         <FilterBar
@@ -139,6 +129,6 @@ export default function DashboardPage() {
         {/* Bottom: Real-time data table */}
         <DataTable data={latestData} />
       </div>
-    </div>
+    </ScreenScaler>
   );
 }

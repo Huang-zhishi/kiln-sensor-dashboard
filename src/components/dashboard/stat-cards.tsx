@@ -1,5 +1,7 @@
 'use client';
 
+import { useState, useEffect, useRef } from 'react';
+
 interface SensorData {
   device_id: string;
   kiln_id: string;
@@ -25,6 +27,34 @@ interface StatCardsProps {
   stats: StatsData | null;
 }
 
+// 数字平滑补间：值变化时 rAF 缓动过渡，营造大屏数字"跳动"质感
+function AnimatedNumber({ value, format }: { value: number; format?: (n: number) => string }) {
+  const [display, setDisplay] = useState(value);
+  const prevRef = useRef(value);
+
+  useEffect(() => {
+    const from = prevRef.current;
+    const to = value;
+    prevRef.current = to;
+    if (from === to) return;
+
+    const duration = 500;
+    const start = performance.now();
+    let raf = 0;
+
+    const step = (t: number) => {
+      const p = Math.min((t - start) / duration, 1);
+      const eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      setDisplay(from + (to - from) * eased);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+
+  return <>{format ? format(display) : Math.round(display).toLocaleString()}</>;
+}
+
 export function StatCards({ data, stats }: StatCardsProps) {
   const totalDevices = new Set(data.map((d) => d.device_id)).size;
   const totalKilns = new Set(data.map((d) => d.kiln_id)).size;
@@ -36,16 +66,22 @@ export function StatCards({ data, stats }: StatCardsProps) {
     d.sensor_tag.toLowerCase().includes('temp') ||
     d.sensor_tag.toLowerCase().includes('温度')
   );
-  const avgTemp = tempSensors.length > 0
-    ? (tempSensors.reduce((sum, d) => sum + d.sensor_value, 0) / tempSensors.length).toFixed(1)
-    : '--';
+  const avgTempValue = tempSensors.length > 0
+    ? tempSensors.reduce((sum, d) => sum + d.sensor_value, 0) / tempSensors.length
+    : null;
 
   const cards = [
-    { label: '数据总量', value: totalRecords.toLocaleString(), unit: '条' },
-    { label: '在线窑体', value: String(totalKilns), unit: '座' },
-    { label: '在线设备', value: String(totalDevices), unit: '台' },
-    { label: '传感器数', value: String(totalSensors), unit: '个' },
-    { label: '平均温度', value: avgTemp, unit: '°C' },
+    { label: '数据总量', value: <AnimatedNumber value={totalRecords} />, unit: '条' },
+    { label: '在线窑体', value: <AnimatedNumber value={totalKilns} />, unit: '座' },
+    { label: '在线设备', value: <AnimatedNumber value={totalDevices} />, unit: '台' },
+    { label: '传感器数', value: <AnimatedNumber value={totalSensors} />, unit: '个' },
+    {
+      label: '平均温度',
+      value: avgTempValue === null
+        ? '--'
+        : <AnimatedNumber value={avgTempValue} format={(n) => n.toFixed(1)} />,
+      unit: '°C',
+    },
   ];
 
   return (

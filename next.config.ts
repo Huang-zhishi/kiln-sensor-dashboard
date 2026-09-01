@@ -1,8 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // outputFileTracingRoot: path.resolve(__dirname, '../../'),  // Uncomment and add 'import path from "path"' if needed
-  /* config options here */
+  // 生产独立部署模式：构建产物自带运行时，服务器无需 node_modules 全量安装
+  output: 'standalone',
   images: {
     remotePatterns: [
       {

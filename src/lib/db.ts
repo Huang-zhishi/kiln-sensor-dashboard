@@ -17,11 +17,11 @@ const BASE_URL = `http://${TDENGINE_HOST}:${TDENGINE_PORT}/rest/sql/${TDENGINE_D
 const AUTH_HEADER = 'Basic ' + Buffer.from(`${TDENGINE_USER}:${TDENGINE_PASSWORD}`).toString('base64');
 
 // 缓存配置
-// 注意：TTL 必须大于前端轮询间隔（30s），否则缓存永远刚过期就失效。
+// SSE Hub 每 2s tick 一次，TTL 决定真实查询频率；缓存命中则直接广播
 export const CACHE_TTL = {
-  stats: 60000,      // 60 秒（24h 聚合是重查询，必须拉长缓存）
-  latest: 20000,     // 20 秒
-  history: 60000,    // 60 秒
+  stats: 60000,      // 60 秒
+  latest: 5000,      // 5 秒
+  history: 15000,    // 15 秒
 };
 
 interface CacheEntry<T> {
@@ -91,8 +91,13 @@ export async function query(sql: string): Promise<TDengineResult> {
   }
 }
 
+// 同 key 的 in-flight 查询共享同一个 Promise，防止缓存过期瞬间的并发击穿
+const inflight = new Map<string, Promise<unknown>>();
+
 /**
- * 带缓存的查询函数
+ * 带缓存的查询函数（含缓存击穿去重）
+ * @param key 缓存键（含查询参数，避免不同筛选串数据）
+ * @param sql 查询语句
  * @param ttl 缓存有效期（毫秒），默认 10 秒
  */
 export async function queryWithCache<T>(cacheKey: string, sql: string, ttl?: number): Promise<T> {
@@ -100,18 +105,27 @@ export async function queryWithCache<T>(cacheKey: string, sql: string, ttl?: num
 
   // 尝试从缓存获取
   const cached = getCached<T>(cacheKey, ttlMs);
-  if (cached) {
+  if (cached !== null) {
     return cached;
   }
 
-  // 执行查询
-  const result = await query(sql);
-  const data = toRows(result) as unknown as T;
+  // 并发请求共享同一次查询
+  const existing = inflight.get(cacheKey);
+  if (existing) {
+    return existing as Promise<T>;
+  }
 
-  // 存入缓存
-  setCache(cacheKey, data);
+  const promise = (async () => {
+    const result = await query(sql);
+    const data = toRows(result) as unknown as T;
+    setCache(cacheKey, data);
+    return data;
+  })().finally(() => {
+    inflight.delete(cacheKey);
+  });
+  inflight.set(cacheKey, promise);
 
-  return data;
+  return promise;
 }
 
 /**
