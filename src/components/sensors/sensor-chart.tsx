@@ -1,15 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
+import type { EChartsOption } from 'echarts';
+import { EChart } from '@/components/charts/echarts';
 import { SENSOR_TYPE_COLORS, type SensorType } from '@/lib/sensor-classifier';
 
 interface SensorDataPoint {
@@ -28,7 +21,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
 
   // 使用 useMemo 缓存计算结果，避免不必要的重计算
-  const { formatTime, latestValue, yDomain, chartData } = useMemo(() => {
+  const { formatTime, latestValue, yDomain, chartData, chartOption } = useMemo(() => {
     // 格式化时间
     const formatTime = (ts: string) => {
       const date = new Date(ts);
@@ -46,13 +39,53 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
     const minVal = values.length > 0 ? Math.min(...values) : 0;
     const maxVal = values.length > 0 ? Math.max(...values) : 0;
     const padding = (maxVal - minVal) * 0.1 || 1;
-    const yDomain = [minVal - padding, maxVal + padding];
+    const yDomain: [number, number] = [minVal - padding, maxVal + padding];
 
     // 使用稳定的数据引用
     const chartData = data;
 
-    return { formatTime, latestValue, yDomain, chartData };
-  }, [data]);
+    const chartOption: EChartsOption = {
+      animation: false,
+      backgroundColor: 'transparent',
+      grid: { top: 8, right: 8, bottom: 18, left: 40 },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#1f2227',
+        borderColor: 'rgba(204,204,220,0.19)',
+        borderRadius: 3,
+        textStyle: { fontSize: 12 },
+        valueFormatter: (v: unknown) => `${Number(v).toFixed(2)} ${unit}`,
+      },
+      xAxis: {
+        type: 'category',
+        data: chartData.map((d) => formatTime(d.reported_at)),
+        axisLine: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
+        axisTick: { show: false },
+        axisLabel: { color: '#8b8b8b', fontSize: 10, hideOverlap: true },
+      },
+      yAxis: {
+        type: 'value',
+        min: yDomain[0],
+        max: yDomain[1],
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: 'rgba(204,204,220,0.08)', type: 'dashed' } },
+        axisLabel: { color: '#8b8b8b', fontSize: 10 },
+      },
+      series: [
+        {
+          name,
+          type: 'line',
+          data: chartData.map((d) => d.sensor_value),
+          showSymbol: false,
+          lineStyle: { width: 2, color },
+          color,
+        },
+      ],
+    };
+
+    return { formatTime, latestValue, yDomain, chartData, chartOption };
+  }, [data, color, name, unit]);
 
   return (
     <div className="bg-card rounded border border-border p-4 hover:border-border-strong transition-colors">
@@ -77,46 +110,7 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
 
       {/* 图表 */}
       <div className="h-[120px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-            <CartesianGrid
-              strokeDasharray="3 3"
-              stroke="rgba(204,204,220,0.08)"
-            />
-            <XAxis
-              dataKey="reported_at"
-              tickFormatter={formatTime}
-              stroke="#8b8b8b"
-              fontSize={10}
-              interval="preserveStartEnd"
-            />
-            <YAxis
-              domain={yDomain}
-              stroke="#8b8b8b"
-              fontSize={10}
-              width={40}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#1f2227',
-                border: '1px solid rgba(204,204,220,0.19)',
-                borderRadius: '3px',
-                fontSize: '12px',
-              }}
-              labelFormatter={(label) => `时间: ${formatTime(label)}`}
-              formatter={(value: number) => [`${value.toFixed(2)} ${unit}`, name]}
-            />
-            <Line
-              type="monotone"
-              dataKey="sensor_value"
-              stroke={color}
-              strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4, fill: color }}
-              isAnimationActive={false}
-            />
-          </LineChart>
-        </ResponsiveContainer>
+        <EChart option={chartOption} style={{ width: '100%', height: '100%' }} />
       </div>
 
       {/* 底部信息 */}

@@ -117,6 +117,68 @@ function buildAllSensorsHistoryQuery(timeRange: string): string {
   `;
 }
 
+// ---------- 统计查询：优先读流计算预聚合表，不存在则回退直查原始表 ----------
+// 聚合表由 TDengine 服务器上的 stats_1m 流自动维护（见 ARCHITECTURE_TODO.md P2）
+// 状态探测：null=未探测 / true=可用 / false=不可用（回退，重启进程后重试）
+let aggTableAvailable: boolean | null = null;
+
+function buildAggStatsSql(kiln_id: string): string {
+  return `
+    SELECT
+      SUM(cnt) as total,
+      sensor_tag,
+      device_id,
+      AVG(avg_val) as avg_val,
+      MIN(min_val) as min_val,
+      MAX(max_val) as max_val
+    FROM stats_1m_agg
+    WHERE ts > NOW() - 24h
+    ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
+    GROUP BY sensor_tag, device_id
+  `;
+}
+
+function buildDirectStatsSql(kiln_id: string): string {
+  return `
+    SELECT
+      COUNT(ts) as total,
+      sensor_tag,
+      device_id,
+      AVG(sensor_value) as avg_val,
+      MIN(sensor_value) as min_val,
+      MAX(sensor_value) as max_val
+    FROM sensor_readings
+    WHERE ts > NOW() - 24h
+    ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
+    GROUP BY sensor_tag, device_id
+  `;
+}
+
+async function fetchStatsRows(kiln_id: string): Promise<Record<string, unknown>[]> {
+  if (aggTableAvailable !== false) {
+    try {
+      const rows = await queryWithCache<Record<string, unknown>[]>(
+        `stats-agg:${kiln_id}`,
+        buildAggStatsSql(kiln_id),
+        CACHE_TTL.stats,
+      );
+      aggTableAvailable = true;
+      return rows;
+    } catch (err) {
+      if (aggTableAvailable === true) throw err; // 之前确认可用，这次是真错误
+      aggTableAvailable = false;
+      console.warn(
+        '[stats] stats_1m_agg 不可用，回退为直查原始表。在 TDengine 上创建 stats_1m 流后重启进程即可启用预聚合。',
+      );
+    }
+  }
+  return queryWithCache<Record<string, unknown>[]>(
+    `stats:${kiln_id}`,
+    buildDirectStatsSql(kiln_id),
+    CACHE_TTL.stats,
+  );
+}
+
 // 大屏聚合数据：最新读数 + 统计 + 历史趋势
 export async function fetchDashboardData(p: DashboardParams) {
   const { kiln_id, time_range, sensors } = p;
@@ -130,21 +192,9 @@ export async function fetchDashboardData(p: DashboardParams) {
       PARTITION BY device_id, sensor_tag
     `, CACHE_TTL.latest),
 
-    // 2. 统计数据（24h 聚合，缓存 60s；ENABLE_STATS 应急开关）
+    // 2. 统计数据（优先读流计算预聚合表，缓存 60s；ENABLE_STATS 应急开关）
     process.env.ENABLE_STATS === '1'
-      ? queryWithCache<Record<string, unknown>[]>(`stats:${kiln_id}`, `
-        SELECT
-          COUNT(ts) as total,
-          sensor_tag,
-          device_id,
-          AVG(sensor_value) as avg_val,
-          MIN(sensor_value) as min_val,
-          MAX(sensor_value) as max_val
-        FROM sensor_readings
-        WHERE ts > NOW() - 24h
-        ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
-        GROUP BY sensor_tag, device_id
-      `, CACHE_TTL.stats)
+      ? fetchStatsRows(kiln_id)
       : Promise.resolve([] as Record<string, unknown>[]),
 
     // 3. 历史趋势（缓存 15s）

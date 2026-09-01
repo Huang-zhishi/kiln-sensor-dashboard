@@ -1,16 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from 'recharts';
+import type { EChartsOption } from 'echarts';
+import { EChart } from '@/components/charts/echarts';
 import { classifySensor, SENSOR_TYPES, SENSOR_TYPE_COLORS, type SensorType } from '@/lib/sensor-classifier';
 
 interface SensorData {
@@ -240,6 +232,82 @@ export function TrendChart({
   const displayTags = visibleTags.slice(0, 12);
   const extraCount = visibleTags.length - 12;
 
+  // ECharts 配置：Canvas 渲染 + 关闭动画，SSE 高频推送下无闪烁
+  const chartOption = useMemo<EChartsOption>(() => {
+    const series = displayTags.map((tag) => {
+      const idx = allTags.indexOf(tag) % COLORS.length;
+      return {
+        name: tag,
+        type: 'line' as const,
+        data: chartData.map((row) => [row.time as string, row[tag] as number | null]),
+        showSymbol: chartData.length <= 30,
+        symbolSize: 4,
+        lineStyle: { width: 1.5 },
+        color: COLORS[idx],
+        connectNulls: true,
+      };
+    });
+
+    return {
+      animation: false,
+      backgroundColor: 'transparent',
+      grid: { top: 10, right: 20, bottom: 40, left: 55, containLabel: false },
+      legend: {
+        type: 'scroll',
+        bottom: 0,
+        textStyle: { fontSize: 10, color: '#a1a1a1' },
+        itemWidth: 14,
+        itemHeight: 2,
+        icon: 'rect',
+        pageIconColor: '#8b8b8b',
+        pageIconInactiveColor: '#555',
+        pageTextStyle: { color: '#8b8b8b' },
+      },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#1f2227',
+        borderColor: 'rgba(204,204,220,0.19)',
+        borderRadius: 3,
+        textStyle: { fontSize: 11, color: '#e0e0e0' },
+        valueFormatter: (v: unknown) => {
+          const num = Number(v);
+          return isNaN(num) ? String(v ?? '') : num.toFixed(2);
+        },
+      },
+      xAxis: {
+        type: 'category',
+        data: chartData.map((row) => row.time as string),
+        axisLine: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
+        axisTick: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
+        axisLabel: {
+          color: '#8b8b8b',
+          fontSize: 10,
+          rotate: 20,
+          interval: 'auto',
+          hideOverlap: true,
+        },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: 'rgba(204,204,220,0.08)', type: 'dashed' } },
+        axisLabel: {
+          color: '#8b8b8b',
+          fontSize: 10,
+          formatter: (v: number) => {
+            if (!isFinite(v)) return '';
+            if (v >= 1000) return v.toFixed(0);
+            if (v >= 10) return v.toFixed(1);
+            return v.toFixed(2);
+          },
+        },
+        scale: true,
+      },
+      series,
+    };
+  }, [chartData, displayTags, allTags]);
+
   return (
     <div className="panel h-full flex flex-col">
       <div className="panel-title flex items-center justify-between">
@@ -336,66 +404,7 @@ export function TrendChart({
             暂无数据
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(204,204,220,0.08)" />
-              <XAxis
-                dataKey="time"
-                tick={{ fill: '#8b8b8b', fontSize: 10 }}
-                axisLine={{ stroke: 'rgba(204,204,220,0.15)' }}
-                tickLine={{ stroke: 'rgba(204,204,220,0.15)' }}
-                interval="preserveStartEnd"
-                angle={-20}
-                textAnchor="end"
-                height={40}
-              />
-              <YAxis
-                tick={{ fill: '#8b8b8b', fontSize: 10 }}
-                axisLine={{ stroke: 'rgba(204,204,220,0.15)' }}
-                tickLine={{ stroke: 'rgba(204,204,220,0.15)' }}
-                width={50}
-                tickFormatter={(v: number) => {
-                  if (typeof v !== 'number' || isNaN(v) || !isFinite(v)) return '';
-                  if (v >= 1000) return v.toFixed(0);
-                  if (v >= 10) return v.toFixed(1);
-                  return v.toFixed(2);
-                }}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: '#1f2227',
-                  border: '1px solid rgba(204,204,220,0.19)',
-                  borderRadius: '3px',
-                  fontSize: '11px',
-                  color: '#e0e0e0',
-                }}
-                labelStyle={{ color: '#a1a1a1' }}
-                formatter={(value: number | string, name: string) => {
-                  const num = Number(value);
-                  return [isNaN(num) ? String(value) : num.toFixed(2), name];
-                }}
-              />
-              <Legend
-                wrapperStyle={{ fontSize: '10px', color: '#a1a1a1' }}
-                iconType="line"
-              />
-              {displayTags.map((tag) => {
-                const idx = allTags.indexOf(tag) % COLORS.length;
-                return (
-                  <Line
-                    key={tag}
-                    type="monotone"
-                    dataKey={tag}
-                    stroke={COLORS[idx]}
-                    strokeWidth={1.5}
-                    dot={chartData.length <= 30 ? { r: 2, fill: COLORS[idx] } : false}
-                    activeDot={{ r: 4 }}
-                    connectNulls
-                  />
-                );
-              })}
-            </LineChart>
-          </ResponsiveContainer>
+          <EChart option={chartOption} style={{ width: '100%', height: '100%' }} />
         )}
       </div>
     </div>

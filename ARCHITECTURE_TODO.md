@@ -55,23 +55,29 @@
 
 ## P2 查询提速（下周）
 
-- [ ] TDengine 流计算预聚合，写入时自动维护分钟级统计：
+- [x] TDengine 流计算预聚合（✅ 已在 192.168.1.78 由 pi Agent 执行完成，2026-09-01）：
   ```sql
+  -- 实际执行的 SQL（原始提示词的 3 处修正由 pi Agent 按 3.3.5 文档完成：
+  -- ① 流名不能带库前缀 ② FILL_HISTORY 是流选项须放 INTO 之前 ③ 输出表需显式 TAGS(...)）
   CREATE STREAM IF NOT EXISTS stats_1m
     TRIGGER WINDOW_CLOSE
-    INTO stats_1m_agg AS
-    SELECT _wstart AS ts, sensor_tag, device_id,
-           AVG(sensor_value) AS avg_val,
-           MIN(sensor_value) AS min_val,
-           MAX(sensor_value) AS max_val,
-           COUNT(ts) AS cnt
-    FROM sensor_readings
+    FILL_HISTORY 1
+    INTO test.stats_1m_agg
+    TAGS(sensor_tag NCHAR(128), device_id NCHAR(32))
+  AS
+    SELECT _wstart AS ts, AVG(sensor_value) AS avg_val, MIN(sensor_value) AS min_val,
+           MAX(sensor_value) AS max_val, COUNT(ts) AS cnt
+    FROM test.sensor_readings
     PARTITION BY sensor_tag, device_id
     INTERVAL(1m);
   ```
-  stats 接口改为查 `stats_1m_agg`（毫秒级），删除 `ENABLE_STATS` 应急开关
-- [ ] REST → WebSocket：`db.ts` 的 `query()` 换 taosAdapter ws 长连接（37ms → 1~5ms）
-- [ ] 趋势图迁移 ECharts（Canvas 渲染，SVG 在高频更新下会成瓶颈；自带 gauge/热力图，替代手写 sensor-gauge）
+  回填 4380 行（源 51193 行），增量聚合验证正常；回滚：`DROP STREAM IF EXISTS stats_1m; DROP STABLE IF EXISTS test.stats_1m_agg;`
+  应用侧：stats 优先查 `stats_1m_agg`（`dashboard-data.ts`，聚合表异常自动回退直查原始表），实测接口 177ms、服务端无回退警告
+- [x] REST → WebSocket：`db.ts` 换 `@tdengine/websocket` 官方连接器（4 连接池 + 10s 超时 + 坏连接自动废弃 + 时间戳量级自适应转换）
+  - 坑 1：Turbopack 会把 websocket 库解析成浏览器构建 → `next.config.ts` 加 `serverExternalPackages`
+  - 坑 2：连接器返回毫秒 bigint 而非文档描述的纳秒 → 按量级自适应转 ISO 字符串
+- [x] 趋势图 + 传感器迷你图迁移 ECharts 6（Canvas 渲染、`animation:false` 适配 SSE 2s 推送；封装 `components/charts/echarts.tsx`；移除 recharts）
+- [x] 顺带修复：大屏默认趋势传感器在切换到新库后失效 → 自动回退到实际存在的前 4 个传感器
 
 ## P3 观感与收尾（随手做）
 

@@ -54,6 +54,15 @@ export default function DashboardPage() {
   // 趋势图选中的传感器（受控状态，联动 API 精确查询）
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>(DEFAULT_TREND_TAGS);
 
+  // 实际生效的选中标签：默认标签在新库不存在时自动回退到前 4 个实际传感器
+  const candidates = stats?.sensorTags.map((t) => t.sensor_tag) || [];
+  const effectiveTrendTags = useMemo(() => {
+    if (selectedTrendTags.length === 0) return []; // 用户显式清空
+    const valid = selectedTrendTags.filter((t) => candidates.includes(t));
+    return valid.length > 0 ? valid : candidates.slice(0, 4);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTrendTags, stats]);
+
   // SSE 实时订阅：服务端单点查询 + 广播，相同筛选参数的观众共享一次查询
   // connNonce 仅用于手动刷新时重建连接
   const [connNonce, setConnNonce] = useState(0);
@@ -62,8 +71,8 @@ export default function DashboardPage() {
     const params = new URLSearchParams();
     params.set('time_range', timeRange);
     if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
-    // 趋势图只订阅选中的传感器历史；空选择时显式传空，避免回退全量查询
-    params.set('sensors', selectedTrendTags.join(','));
+    // 趋势图只订阅选中传感器的历史；空选择时显式传空，避免回退全量查询
+    params.set('sensors', effectiveTrendTags.join(','));
 
     const es = new EventSource(`/api/stream?${params}`);
     es.onmessage = (e) => {
@@ -83,7 +92,7 @@ export default function DashboardPage() {
     };
 
     return () => es.close();
-  }, [filters, timeRange, selectedTrendTags, connNonce]);
+  }, [filters, timeRange, effectiveTrendTags, connNonce]);
 
   const handleRefresh = useMemo(() => () => setConnNonce((n) => n + 1), []);
 
@@ -114,9 +123,9 @@ export default function DashboardPage() {
               timeRange={timeRange}
               onTimeRangeChange={setTimeRange}
               defaultTags={DEFAULT_TREND_TAGS}
-              selectedTags={selectedTrendTags}
+              selectedTags={effectiveTrendTags}
               onSelectedTagsChange={setSelectedTrendTags}
-              candidateTags={stats?.sensorTags.map((t) => t.sensor_tag) || []}
+              candidateTags={candidates}
             />
           </div>
 
