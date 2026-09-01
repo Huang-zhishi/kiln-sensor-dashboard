@@ -155,8 +155,14 @@ export default function SensorsPage() {
         {/* 图表网格 */}
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-muted-foreground">加载中...</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="panel p-3">
+                  <div className="shimmer h-3 w-24 mb-2" />
+                  <div className="shimmer h-6 w-16 mb-3" />
+                  <div className="shimmer h-[120px]" />
+                </div>
+              ))}
             </div>
           ) : filteredSensors.length === 0 ? (
             <div className="flex items-center justify-center h-full">

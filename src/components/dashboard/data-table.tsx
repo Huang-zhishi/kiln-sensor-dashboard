@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { getSensorLevel } from '@/lib/sensor-classifier';
 
 interface SensorData {
@@ -15,7 +16,8 @@ interface DataTableProps {
   data: SensorData[];
 }
 
-const PAGE_SIZE = 12;
+// 固定行高（虚拟滚动按此估算；也规避祖先 transform:scale 对测量值的干扰）
+const ROW_H = 35;
 
 function formatDate(isoStr: string): string {
   const d = new Date(isoStr);
@@ -28,99 +30,90 @@ function getValueColor(tag: string, value: number): string {
   return level === 'danger' ? '#f2495c' : level === 'warning' ? '#fade2a' : '#e0e0e0';
 }
 
+const COLS = 'minmax(60px, 0.8fr) minmax(110px, 1.2fr) minmax(110px, 1.2fr) minmax(70px, 0.8fr) minmax(130px, 1fr)';
+
 export function DataTable({ data }: DataTableProps) {
   const [mounted, setMounted] = useState(false);
-  const [page, setPage] = useState(1);
   useEffect(() => { setMounted(true); }, []);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const sortedData = useMemo(() =>
     [...data].sort((a, b) => new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime()),
     [data]
   );
 
-  const totalPages = Math.max(1, Math.ceil(sortedData.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const pageData = sortedData.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-
-  useEffect(() => {
-    if (safePage > totalPages) setPage(totalPages);
-  }, [safePage, totalPages]);
+  // 虚拟滚动：只渲染可视区行（SSE 每 2s 全量更新数据，滚动浏览比翻页更顺）
+  const virtualizer = useVirtualizer({
+    count: sortedData.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 8,
+  });
 
   return (
     <div className="panel">
       <div className="panel-title">
         实时数据列表
         <span className="ml-auto text-xs text-muted-foreground font-normal normal-case">
-          共 {data.length} 条
+          共 {data.length} 条 · 滚动查看
         </span>
       </div>
-      <div className="overflow-auto max-h-[320px]">
-        {pageData.length === 0 ? (
+      <div ref={scrollRef} className="overflow-auto max-h-[320px]">
+        {sortedData.length === 0 ? (
           <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
             暂无数据
           </div>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>窑体</th>
-                <th>设备</th>
-                <th>传感器</th>
-                <th>数值</th>
-                <th>时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageData.map((row, idx) => (
-                <tr key={`${row.device_id}-${row.sensor_tag}-${idx}`}>
-                  <td>
-                    <span className="text-foreground">{row.kiln_id}</span>
-                  </td>
-                  <td>
-                    <span className="text-muted-foreground">{row.device_id}</span>
-                  </td>
-                  <td>
-                    <span className="text-muted-foreground">{row.sensor_tag}</span>
-                  </td>
-                  <td>
-                    <span className="font-bold" style={{
-                      color: getValueColor(row.sensor_tag, Number(row.sensor_value) || 0),
-                    }}>
-                      {(Number(row.sensor_value) || 0).toFixed(2)}
-                    </span>
-                  </td>
-                  <td>
-                    <span className="text-muted-foreground">
-                      {mounted ? formatDate(row.reported_at) : '--'}
-                    </span>
-                  </td>
-                </tr>
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {/* 表头 */}
+            <div
+              className="grid sticky top-0 z-10 bg-card border-b border-border"
+              style={{ gridTemplateColumns: COLS, height: ROW_H }}
+            >
+              {['窑体', '设备', '传感器', '数值', '时间'].map((h) => (
+                <div key={h} className="flex items-center px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {h}
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+            {/* 可视区行 */}
+            {virtualizer.getVirtualItems().map((vi) => {
+              const row = sortedData[vi.index];
+              return (
+                <div
+                  key={`${row.device_id}-${row.sensor_tag}-${row.reported_at}`}
+                  className="grid hover:bg-white/[0.025] border-b border-white/[0.07]"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: vi.size,
+                    transform: `translateY(${vi.start + ROW_H}px)`,
+                    gridTemplateColumns: COLS,
+                  }}
+                >
+                  <div className="flex items-center px-3 text-[13px] font-mono text-foreground truncate">
+                    {row.kiln_id}
+                  </div>
+                  <div className="flex items-center px-3 text-[13px] font-mono text-muted-foreground truncate">
+                    {row.device_id}
+                  </div>
+                  <div className="flex items-center px-3 text-[13px] font-mono text-muted-foreground truncate">
+                    {row.sensor_tag}
+                  </div>
+                  <div className="flex items-center px-3 text-[13px] font-bold" style={{ color: getValueColor(row.sensor_tag, Number(row.sensor_value) || 0) }}>
+                    {(Number(row.sensor_value) || 0).toFixed(2)}
+                  </div>
+                  <div className="flex items-center px-3 text-[13px] font-mono text-muted-foreground">
+                    {mounted ? formatDate(row.reported_at) : '--'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
-      </div>
-      {/* 分页 */}
-      <div className="flex items-center justify-between px-4 py-2 border-t border-border">
-        <span className="text-xs text-muted-foreground">
-          第 {safePage} / {totalPages} 页
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={safePage <= 1}
-            className="px-2 py-0.5 text-xs rounded transition-colors bg-card border border-border-strong text-foreground hover:bg-card-hover disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            上一页
-          </button>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={safePage >= totalPages}
-            className="px-2 py-0.5 text-xs rounded transition-colors bg-card border border-border-strong text-foreground hover:bg-card-hover disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            下一页
-          </button>
-        </div>
       </div>
     </div>
   );

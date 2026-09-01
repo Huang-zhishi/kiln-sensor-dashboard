@@ -87,6 +87,29 @@ body {
   position: relative;
 }
 
+/* ===== 骨架屏 shimmer ===== */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: rgba(204, 204, 220, 0.06);
+  border-radius: 3px;
+}
+
+.shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(204, 204, 220, 0.09), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .panel-title {
   font-size: 13px;
   font-weight: 600;

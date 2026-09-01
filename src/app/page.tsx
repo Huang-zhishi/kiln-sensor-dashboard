@@ -9,6 +9,7 @@ import { KilnOverview } from '@/components/dashboard/kiln-overview';
 import { DataTable } from '@/components/dashboard/data-table';
 import { AlarmList } from '@/components/dashboard/alarm-list';
 import { ScreenScaler } from '@/components/dashboard/screen-scaler';
+import { DashboardSkeleton } from '@/components/dashboard/panel-skeleton';
 
 interface SensorData {
   device_id: string;
@@ -100,7 +101,10 @@ export default function DashboardPage() {
     <ScreenScaler>
       <DashboardHeader lastUpdate={lastUpdate} onRefresh={handleRefresh} loading={loading} />
 
-      <div className="px-4 pb-6 space-y-3">
+      {loading && latestData.length === 0 ? (
+        <DashboardSkeleton />
+      ) : (
+        <div className="px-4 pb-6 space-y-3">
         <FilterBar
           filters={filters}
           onFilterChange={setFilters}
@@ -137,7 +141,8 @@ export default function DashboardPage() {
 
         {/* Bottom: Real-time data table */}
         <DataTable data={latestData} />
-      </div>
+        </div>
+      )}
     </ScreenScaler>
   );
 }
