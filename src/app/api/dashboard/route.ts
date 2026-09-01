@@ -4,6 +4,10 @@ import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
 
+// 统计卡片（24h 聚合重查询）应急开关：默认关闭，减轻服务器压力。
+// 恢复：在服务端设置环境变量 ENABLE_STATS=1 后重启即可。
+const STATS_ENABLED = process.env.ENABLE_STATS === '1';
+
 // 标准 SQL 转义（TDengine 适用）：单引号双写 + 反斜杠转义
 function escapeSql(s: string): string {
   return s.replace(/'/g, "''").replace(/\\/g, '\\\\');
@@ -95,20 +99,22 @@ export async function GET(request: Request) {
         PARTITION BY device_id, sensor_tag
       `, CACHE_TTL.latest),
 
-      // 2. 统计数据查询（带缓存，15 秒；key 含筛选参数避免串数据）
-      queryWithCache(`stats:${kiln_id}`, `
-        SELECT
-          COUNT(ts) as total,
-          sensor_tag,
-          device_id,
-          AVG(sensor_value) as avg_val,
-          MIN(sensor_value) as min_val,
-          MAX(sensor_value) as max_val
-        FROM sensor_readings
-        WHERE ts > NOW() - 24h
-        ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
-        GROUP BY sensor_tag, device_id
-      `, CACHE_TTL.stats),
+      // 2. 统计数据查询（24h 聚合重查询，应急默认关闭；开启时带 60 秒缓存）
+      STATS_ENABLED
+        ? queryWithCache(`stats:${kiln_id}`, `
+          SELECT
+            COUNT(ts) as total,
+            sensor_tag,
+            device_id,
+            AVG(sensor_value) as avg_val,
+            MIN(sensor_value) as min_val,
+            MAX(sensor_value) as max_val
+          FROM sensor_readings
+          WHERE ts > NOW() - 24h
+          ${kiln_id ? `AND sensor_tag LIKE '${escapeSql(kiln_id)}%'` : ''}
+          GROUP BY sensor_tag, device_id
+        `, CACHE_TTL.stats)
+        : Promise.resolve([] as Record<string, unknown>[]),
 
       // 3. 历史趋势查询（精确到选中传感器；缓存 60 秒避免轮询重复拖库）
       queryWithCache(

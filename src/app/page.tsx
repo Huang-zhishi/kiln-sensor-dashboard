@@ -81,12 +81,20 @@ export default function DashboardPage() {
     fetchAll();
   }, [fetchAll]);
 
-  // Auto refresh every 15 seconds
+  // Auto refresh every 30 seconds（页面不可见时暂停，节省服务器压力）
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchAll();
-    }, 15000);
-    return () => clearInterval(interval);
+      if (document.visibilityState === 'visible') fetchAll();
+    }, 30000);
+    // 切回页面时立即刷新一次
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchAll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetchAll]);
 
   return (

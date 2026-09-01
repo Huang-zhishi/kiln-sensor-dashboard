@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, toRows } from '@/lib/db';
+import { queryWithCache, toRows, CACHE_TTL, type TDengineResult } from '@/lib/db';
 import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
@@ -61,7 +61,11 @@ export async function GET(request: NextRequest) {
       ORDER BY ts ASC
     `;
 
-    const result = await query(sql);
+    const result = await queryWithCache<TDengineResult>(
+      `history:${timeRange}:${kilnId ?? ''}:${sensorTag ?? ''}`,
+      sql,
+      CACHE_TTL.history,
+    );
     const rows = toRows(result);
 
     const data = rows.map((r) => ({

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query, toRows } from '@/lib/db';
+import { queryWithCache, toRows, CACHE_TTL, type TDengineResult } from '@/lib/db';
 import { classifySensor, extractKilnId, UNIT_MAP, type SensorType } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
@@ -37,7 +37,8 @@ export async function GET() {
       ORDER BY sensor_tag
     `;
 
-    const result = await query(sql);
+    // 传感器列表变化极慢，缓存 60 秒
+    const result = await queryWithCache<TDengineResult>('list:all', sql, CACHE_TTL.history);
     const rows = toRows(result);
 
     const typeCount: Record<SensorType, number> = {

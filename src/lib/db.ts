@@ -1,18 +1,19 @@
 // TDengine REST API connection layer with connection pooling and caching
 
-const TDENGINE_HOST = process.env.TDENGINE_HOST || '8.134.81.26';
+const TDENGINE_HOST = process.env.TDENGINE_HOST || '192.168.1.78';
 const TDENGINE_PORT = Number(process.env.TDENGINE_PORT) || 6041;
 const TDENGINE_USER = process.env.TDENGINE_USER || 'root';
-const TDENGINE_PASSWORD = process.env.TDENGINE_PASSWORD || 'taosdata';
-const TDENGINE_DATABASE = process.env.TDENGINE_DATABASE || 'ams';
+const TDENGINE_PASSWORD = process.env.TDENGINE_PASSWORD || 'Hzsai@0122';
+const TDENGINE_DATABASE = process.env.TDENGINE_DATABASE || 'test';
 
 const BASE_URL = `http://${TDENGINE_HOST}:${TDENGINE_PORT}/rest/sql/${TDENGINE_DATABASE}`;
 const AUTH_HEADER = 'Basic ' + Buffer.from(`${TDENGINE_USER}:${TDENGINE_PASSWORD}`).toString('base64');
 
 // 缓存配置
+// 注意：TTL 必须大于前端轮询间隔（30s），否则缓存永远刚过期就失效。
 export const CACHE_TTL = {
-  stats: 15000,      // 15 秒
-  latest: 10000,     // 10 秒
+  stats: 60000,      // 60 秒（24h 聚合是重查询，必须拉长缓存）
+  latest: 20000,     // 20 秒
   history: 60000,    // 60 秒
 };
 
@@ -53,26 +54,34 @@ export interface TDengineResult {
 
 /**
  * Execute a SQL statement against TDengine via REST API
- * 使用 keep-alive 连接复用
+ * 使用 keep-alive 连接复用；带 10 秒超时，防止慢查询挂起导致请求堆积
  */
 export async function query(sql: string): Promise<TDengineResult> {
-  const res = await fetch(BASE_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': AUTH_HEADER,
-      'Content-Type': 'application/text',
-      'Connection': 'keep-alive',
-    },
-    body: sql,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
 
-  const result = (await res.json()) as TDengineResult;
+  try {
+    const res = await fetch(BASE_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': AUTH_HEADER,
+        'Content-Type': 'application/text',
+        'Connection': 'keep-alive',
+      },
+      body: sql,
+      signal: controller.signal,
+    });
 
-  if (result.code !== 0) {
-    throw new Error(`TDengine error (code ${result.code}): ${result.desc || 'Unknown error'}`);
+    const result = (await res.json()) as TDengineResult;
+
+    if (result.code !== 0) {
+      throw new Error(`TDengine error (code ${result.code}): ${result.desc || 'Unknown error'}`);
+    }
+
+    return result;
+  } finally {
+    clearTimeout(timer);
   }
-
-  return result;
 }
 
 /**

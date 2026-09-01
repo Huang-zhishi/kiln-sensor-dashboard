@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { query, toRows } from '@/lib/db';
+import { queryWithCache, toRows, CACHE_TTL, type TDengineResult } from '@/lib/db';
 import { extractKilnId } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +8,7 @@ export async function GET() {
   try {
     // TDengine: use LAST_ROW() with subtable to get latest per sensor
     // Since each sensor has its own subtable, we query the super table with PARTITION BY
+    // 该接口被前端每 15s 轮询，走缓存避免每次都全子表扫描
     const sql = `
       SELECT LAST(ts) as ts, LAST(sensor_value) as sensor_value, 
              device_id, sensor_tag
@@ -15,7 +16,7 @@ export async function GET() {
       PARTITION BY device_id, sensor_tag
     `;
 
-    const result = await query(sql);
+    const result = await queryWithCache<TDengineResult>('latest:all', sql, CACHE_TTL.latest);
     const rows = toRows(result);
 
     const data = rows.map((r) => ({

@@ -72,8 +72,18 @@ export default function SensorsPage() {
 
   useEffect(() => {
     fetchLatest();
-    const interval = setInterval(fetchLatest, 15000);
-    return () => clearInterval(interval);
+    // 30 秒轮询（页面不可见时暂停）
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') fetchLatest();
+    }, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchLatest();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [fetchLatest]);
 
   // 时间范围变化时重新拉取历史

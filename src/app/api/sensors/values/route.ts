@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query, toRows } from '@/lib/db';
+import { queryWithCache, toRows, CACHE_TTL, type TDengineResult } from '@/lib/db';
 import { classifySensor, extractKilnId, UNIT_MAP } from '@/lib/sensor-classifier';
 
 export const dynamic = 'force-dynamic';
@@ -53,7 +53,12 @@ export async function GET(request: NextRequest) {
       PARTITION BY device_id, sensor_tag
     `;
 
-    const result = await query(sql);
+    // 全子表 LAST 查询带缓存（key 含筛选参数避免串数据）
+    const result = await queryWithCache<TDengineResult>(
+      `values:${sensorTag ?? ''}:${type ?? ''}:${kilnId ?? ''}:${limit}`,
+      sql,
+      CACHE_TTL.latest,
+    );
     let rows = toRows(result);
 
     // Apply filters
