@@ -1,10 +1,17 @@
 // TDengine REST API connection layer with connection pooling and caching
+// 凭据一律从环境变量读取（见项目根目录 .env，已被 .gitignore 排除）
 
 const TDENGINE_HOST = process.env.TDENGINE_HOST || '192.168.1.78';
 const TDENGINE_PORT = Number(process.env.TDENGINE_PORT) || 6041;
-const TDENGINE_USER = process.env.TDENGINE_USER || 'root';
-const TDENGINE_PASSWORD = process.env.TDENGINE_PASSWORD || 'Hzsai@0122';
+const TDENGINE_USER = process.env.TDENGINE_USER;
+const TDENGINE_PASSWORD = process.env.TDENGINE_PASSWORD;
 const TDENGINE_DATABASE = process.env.TDENGINE_DATABASE || 'test';
+
+if (!TDENGINE_USER || !TDENGINE_PASSWORD) {
+  throw new Error(
+    'Missing TDengine credentials: set TDENGINE_USER and TDENGINE_PASSWORD in .env',
+  );
+}
 
 const BASE_URL = `http://${TDENGINE_HOST}:${TDENGINE_PORT}/rest/sql/${TDENGINE_DATABASE}`;
 const AUTH_HEADER = 'Basic ' + Buffer.from(`${TDENGINE_USER}:${TDENGINE_PASSWORD}`).toString('base64');
