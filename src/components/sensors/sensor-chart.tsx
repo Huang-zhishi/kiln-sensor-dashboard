@@ -15,9 +15,18 @@ interface SensorChartProps {
   type: SensorType;
   data: SensorDataPoint[];
   unit: string;
+  isOnline?: boolean;
+  lastReport?: string;
+  /** 设备标识：同一 sensor_tag 可能对应多台设备，用于区分卡片 */
+  deviceId?: string;
 }
 
-export function SensorChart({ name, type, data, unit }: SensorChartProps) {
+// 设备 ID 通常为长随机串，缩略展示（完整值放 title）
+function shortDeviceId(id: string): string {
+  return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
+}
+
+export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
 
   // 使用 useMemo 缓存计算结果，避免不必要的重计算
@@ -50,8 +59,8 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
       grid: { top: 8, right: 8, bottom: 18, left: 40 },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: '#1f2227',
-        borderColor: 'rgba(204,204,220,0.19)',
+        backgroundColor: '#14181f',
+        borderColor: 'rgba(155,170,192,0.24)',
         borderRadius: 3,
         textStyle: { fontSize: 12 },
         valueFormatter: (v: unknown) => `${Number(v).toFixed(2)} ${unit}`,
@@ -59,9 +68,9 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
       xAxis: {
         type: 'category',
         data: chartData.map((d) => formatTime(d.reported_at)),
-        axisLine: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
+        axisLine: { lineStyle: { color: 'rgba(155,170,192,0.2)' } },
         axisTick: { show: false },
-        axisLabel: { color: '#8b8b8b', fontSize: 10, hideOverlap: true },
+        axisLabel: { color: '#8b96a6', fontSize: 10, hideOverlap: true },
       },
       yAxis: {
         type: 'value',
@@ -69,8 +78,8 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
         max: yDomain[1],
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: 'rgba(204,204,220,0.08)', type: 'dashed' } },
-        axisLabel: { color: '#8b8b8b', fontSize: 10 },
+        splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
+        axisLabel: { color: '#8b96a6', fontSize: 10 },
       },
       series: [
         {
@@ -88,24 +97,48 @@ export function SensorChart({ name, type, data, unit }: SensorChartProps) {
   }, [data, color, name, unit]);
 
   return (
-    <div className="bg-card rounded border border-border p-4 hover:border-border-strong transition-colors">
+    <div
+      className={`bg-card rounded border p-4 transition-colors ${
+        isOnline ? 'border-border hover:border-border-strong' : 'border-white/[0.04] opacity-60'
+      }`}
+    >
       {/* 标题栏 */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <div
-            className="w-2 h-2 rounded-full"
-            style={{ backgroundColor: color }}
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: isOnline ? color : 'var(--muted-foreground)' }}
           />
-          <h3 className="text-sm font-medium text-foreground truncate max-w-[200px]">
-            {name}
-          </h3>
-        </div>
-        <div className="text-right">
-          <div className="text-lg font-bold font-mono" style={{ color }}>
-            {latestValue.toFixed(1)}
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-foreground truncate max-w-[160px]">
+              {name}
+            </h3>
+            {deviceId && (
+              <div
+                className="text-[10px] text-muted-foreground font-mono truncate max-w-[160px]"
+                title={deviceId}
+              >
+                {shortDeviceId(deviceId)}
+              </div>
+            )}
           </div>
-          <div className="text-xs text-muted-foreground">{unit}</div>
         </div>
+        {isOnline ? (
+          <div className="text-right">
+            <div className="text-lg font-bold font-mono" style={{ color }}>
+              {latestValue.toFixed(1)}
+            </div>
+            <div className="text-xs text-muted-foreground">{unit}</div>
+          </div>
+        ) : (
+          <div className="text-right">
+            <div className="text-xs font-medium flex items-center gap-1.5 justify-end" style={{ color: 'var(--danger)' }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--danger)' }} />
+              数据中断
+            </div>
+            {lastReport && <div className="text-[10px] text-muted-foreground">最后上报 {lastReport}</div>}
+          </div>
+        )}
       </div>
 
       {/* 图表 */}

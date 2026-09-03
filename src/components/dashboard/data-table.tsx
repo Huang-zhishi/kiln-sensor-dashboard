@@ -10,6 +10,7 @@ interface SensorData {
   sensor_tag: string;
   sensor_value: number;
   reported_at: string;
+  is_online?: boolean;
 }
 
 interface DataTableProps {
@@ -27,10 +28,10 @@ function formatDate(isoStr: string): string {
 
 function getValueColor(tag: string, value: number): string {
   const level = getSensorLevel(tag, value);
-  return level === 'danger' ? '#f2495c' : level === 'warning' ? '#fade2a' : '#e0e0e0';
+  return level === 'danger' ? 'var(--danger)' : level === 'warning' ? 'var(--warning)' : 'var(--foreground)';
 }
 
-const COLS = 'minmax(60px, 0.8fr) minmax(110px, 1.2fr) minmax(110px, 1.2fr) minmax(70px, 0.8fr) minmax(130px, 1fr)';
+const COLS = 'minmax(54px, 0.6fr) minmax(60px, 0.8fr) minmax(105px, 1.1fr) minmax(105px, 1.1fr) minmax(66px, 0.8fr) minmax(125px, 1fr)';
 
 export function DataTable({ data }: DataTableProps) {
   const [mounted, setMounted] = useState(false);
@@ -39,7 +40,13 @@ export function DataTable({ data }: DataTableProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const sortedData = useMemo(() =>
-    [...data].sort((a, b) => new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime()),
+    [...data].sort((a, b) => {
+      // 在线优先，组内按上报时间倒序
+      const oa = a.is_online === false ? 1 : 0;
+      const ob = b.is_online === false ? 1 : 0;
+      if (oa !== ob) return oa - ob;
+      return new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime();
+    }),
     [data]
   );
 
@@ -56,13 +63,14 @@ export function DataTable({ data }: DataTableProps) {
       <div className="panel-title">
         实时数据列表
         <span className="ml-auto text-xs text-muted-foreground font-normal normal-case">
-          共 {data.length} 条 · 滚动查看
+          在线 {data.filter((d) => d.is_online !== false).length} · 离线 {data.filter((d) => d.is_online === false).length} · 滚动查看
         </span>
       </div>
-      <div ref={scrollRef} className="overflow-auto max-h-[320px]">
+      <div ref={scrollRef} className="overflow-auto max-h-[clamp(240px,32vh,420px)]">
         {sortedData.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-            暂无数据
+          <div className="empty-state h-48">
+            <span className="text-sm">暂无实时数据</span>
+            <span className="empty-hint">数据接入后，各传感器的实时读数将在此滚动展示。</span>
           </div>
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -71,7 +79,7 @@ export function DataTable({ data }: DataTableProps) {
               className="grid sticky top-0 z-10 bg-card border-b border-border"
               style={{ gridTemplateColumns: COLS, height: ROW_H }}
             >
-              {['窑体', '设备', '传感器', '数值', '时间'].map((h) => (
+              {['状态', '窑体', '设备', '传感器', '数值', '时间'].map((h) => (
                 <div key={h} className="flex items-center px-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                   {h}
                 </div>
@@ -94,6 +102,19 @@ export function DataTable({ data }: DataTableProps) {
                     gridTemplateColumns: COLS,
                   }}
                 >
+                  <div className="flex items-center px-3">
+                    {row.is_online === false ? (
+                      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--muted-foreground)' }} />
+                        离线
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--success)' }}>
+                        <span className="status-dot online" style={{ width: 6, height: 6 }} />
+                        在线
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center px-3 text-[13px] font-mono text-foreground truncate">
                     {row.kiln_id}
                   </div>

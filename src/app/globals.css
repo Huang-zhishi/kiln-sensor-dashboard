@@ -33,50 +33,95 @@
 }
 
 /*
- * Grafana 现代监控风设计 token
- * 参考 Grafana 深色主题（packages/grafana-ui/src/themes/dark.ts）：
- * - 画布/面板靠背景色分层，弱中性边框，无发光无霓虹
- * - 主强调色为橙色，语义色承担状态表达
+ * 工业窑炉中控台 — 设计 token
+ * 冷黑蓝画布 + 烬金签名强调 + 语义色承担状态表达
+ * 颜色只服务于语义，边框为精密「蚀刻」而非霓虹发光
  */
 :root {
   --radius: 3px;
-  /* 画布与面板（背景分层，不用纯黑） */
-  --background: #111217;
-  --card: #181b1f;
-  --card-hover: #1f2227;
-  --card-foreground: #e0e0e0;
+  /* 画布与面板（背景分层，冷黑蓝而非纯黑） */
+  --background: #0b0e13;
+  --card: #14181f;
+  --card-hover: #1a1f28;
+  --card-foreground: #e8edf4;
   /* 文本层级 */
-  --foreground: #e0e0e0;
-  --muted: #2a2d33;
-  --muted-foreground: #a1a1a1;
-  /* 主强调色（Grafana 橙） */
-  --primary: #ff9830;
-  --primary-foreground: #111217;
+  --foreground: #e8edf4;
+  --muted: #232a36;
+  --muted-foreground: #8b96a6;
+  /* 签名强调色（烬金，炉火主题） */
+  --primary: #f5a524;
+  --primary-foreground: #1a1206;
   /* 边框（弱中性线，代替霓虹发光边框） */
-  --border: rgba(204, 204, 220, 0.13);
-  --border-strong: rgba(204, 204, 220, 0.19);
-  --ring: #ff9830;
-  /* 语义色 */
-  --success: #73bf69;
-  --warning: #fade2a;
-  --danger: #f2495c;
-  --info: #5794f2;
+  --border: rgba(155, 170, 192, 0.14);
+  --border-strong: rgba(155, 170, 192, 0.24);
+  --ring: #f5a524;
+  /* 语义色（在线/预警/超限/信息） */
+  --success: #38c172;
+  --warning: #f7c948;
+  --danger: #ff4d5e;
+  --info: #4da3ff;
+  /* 动效节奏 */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 150ms;
+  --dur-base: 300ms;
+  --dur-reveal: 500ms;
 }
 
 @layer base {
   * {
     border-color: var(--border);
   }
+
+  /* 可见键盘焦点：大厂无障碍底线，仅键盘导航时呈现 */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: rgba(245, 165, 36, 0.28);
+    color: var(--foreground);
+  }
 }
 
 body {
-  background: var(--background);
+  background:
+    radial-gradient(1200px 320px at 50% -80px, rgba(77, 163, 255, 0.05), transparent 70%),
+    var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   overflow-x: hidden;
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ===== 视觉签名：顶部信号迹线 ===== */
+.signal-line {
+  position: relative;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(245, 165, 36, 0.9) 30%,
+    rgba(77, 163, 255, 0.9) 60%,
+    rgba(56, 193, 114, 0.9) 85%,
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: signal-sweep 6s linear infinite;
+  opacity: 0.85;
+}
+
+@keyframes signal-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
 }
 
 /* ===== 面板 ===== */
@@ -87,11 +132,53 @@ body {
   position: relative;
 }
 
+/* ===== 统计卡：顶部强调线 + 悬停反馈 ===== */
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-top: 2px solid rgba(245, 165, 36, 0.55);
+  border-radius: var(--radius);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+.stat-card:hover {
+  background: var(--card-hover);
+  border-color: var(--border-strong);
+  border-top-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+/* ===== 面板内滚动条（细、暗） ===== */
+.panel ::-webkit-scrollbar,
+.panel::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.panel ::-webkit-scrollbar-track,
+.panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel ::-webkit-scrollbar-thumb,
+.panel::-webkit-scrollbar-thumb {
+  background: rgba(155, 170, 192, 0.16);
+  border-radius: 3px;
+}
+
+.panel ::-webkit-scrollbar-thumb:hover,
+.panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(155, 170, 192, 0.3);
+}
+
 /* ===== 骨架屏 shimmer ===== */
 .shimmer {
   position: relative;
   overflow: hidden;
-  background: rgba(204, 204, 220, 0.06);
+  background: rgba(155, 170, 192, 0.06);
   border-radius: 3px;
 }
 
@@ -100,7 +187,7 @@ body {
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(204, 204, 220, 0.09), transparent);
+  background: linear-gradient(90deg, transparent, rgba(155, 170, 192, 0.1), transparent);
   animation: shimmer 1.4s infinite;
 }
 
@@ -113,6 +200,7 @@ body {
 .panel-title {
   font-size: 13px;
   font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--foreground);
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);
@@ -125,6 +213,7 @@ body {
 .data-value {
   font-family: var(--font-mono);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
   color: var(--foreground);
 }
 
@@ -144,7 +233,7 @@ body {
   color: var(--info);
 }
 
-/* ===== 状态点（静态，不做呼吸动画） ===== */
+/* ===== 状态点（静态） ===== */
 .status-dot {
   width: 8px;
   height: 8px;
@@ -166,7 +255,23 @@ body {
 
 /* ===== 数字过渡 ===== */
 .number-transition {
-  transition: all 0.3s ease;
+  transition: all var(--dur-base) var(--ease-out);
+}
+
+/* ===== 入场揭示（首屏一次） ===== */
+.reveal {
+  animation: reveal-up var(--dur-reveal) var(--ease-out) both;
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ===== 滚动条（细、中性） ===== */
@@ -180,12 +285,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(204, 204, 220, 0.25);
+  background: rgba(155, 170, 192, 0.25);
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(204, 204, 220, 0.4);
+  background: rgba(155, 170, 192, 0.4);
 }
 
 /* ===== 表格 ===== */
@@ -208,7 +313,7 @@ body {
 .data-table td {
   font-size: 13px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(204, 204, 220, 0.07);
+  border-bottom: 1px solid rgba(155, 170, 192, 0.07);
   font-family: var(--font-mono);
 }
 
@@ -225,11 +330,11 @@ body {
   font-size: 13px;
   padding: 5px 10px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 
 .filter-select:hover {
-  border-color: rgba(204, 204, 220, 0.3);
+  border-color: rgba(155, 170, 192, 0.32);
 }
 
 .filter-select:focus {
@@ -239,4 +344,33 @@ body {
 .filter-select option {
   background: var(--card);
   color: var(--foreground);
+}
+
+/* ===== 空态 / 错误态（方向而非氛围） ===== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.empty-state .empty-hint {
+  max-width: 260px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ===== 减少动效偏好 ===== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

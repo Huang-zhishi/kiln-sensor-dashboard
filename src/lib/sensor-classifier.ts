@@ -12,17 +12,17 @@ export type SensorType =
   | '设备状态'
   | '其他';
 
-// Grafana 调色板（数据可辨性优先，低饱和、避免荧光感）
+// 传感器类型语义色（与设计 token 对齐，低饱和、可辨性优先）
 export const SENSOR_TYPE_COLORS: Record<SensorType, string> = {
-  '温度': '#f2495c',      // 红 - 高温警示
-  '压力': '#ff9830',      // 橙 - 压力注意
+  '温度': '#ff4d5e',      // 红 - 高温警示
+  '压力': '#f5a524',      // 烬金 - 压力注意
   '流量': '#33a2e5',      // 青蓝 - 流动
   '阀位': '#b877d9',      // 紫 - 控制
-  '液位': '#5794f2',      // 蓝 - 液体
-  '成分检测': '#73bf69',  // 绿 - 成分
-  'pH值': '#ffd166',      // 沙黄 - 化学
-  '设备状态': '#a1a1a1',  // 灰 - 状态
-  '其他': '#8b8b8b',      // 深灰 - 默认
+  '液位': '#4da3ff',      // 蓝 - 液体
+  '成分检测': '#38c172',  // 绿 - 成分
+  'pH值': '#f7c948',      // 沙黄 - 化学
+  '设备状态': '#8b96a6',  // 灰 - 状态
+  '其他': '#6b7280',      // 深灰 - 默认
 };
 
 export const SENSOR_TYPES: SensorType[] = [
@@ -31,6 +31,17 @@ export const SENSOR_TYPES: SensorType[] = [
 ];
 
 export type SensorLevel = 'normal' | 'warning' | 'danger';
+
+// 在线判定：最近一次上报距now超过该时长视为离线
+// 数据上报周期约 5s（TI_806F 每分钟 12 条），60s = 12 个周期无数据即可判定中断
+export const OFFLINE_AFTER_MS = 60_000;
+
+export function isSensorOnline(reportedAt: string | Date | null | undefined, now = Date.now()): boolean {
+  if (!reportedAt) return false;
+  const t = new Date(reportedAt).getTime();
+  if (!isFinite(t)) return false;
+  return now - t <= OFFLINE_AFTER_MS;
+}
 
 // 阈值语义判断：温度/压力超限时返回告警级别（与仪表盘/表格/告警列表共用）
 export function getSensorLevel(tag: string, value: number): SensorLevel {

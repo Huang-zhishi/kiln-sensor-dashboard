@@ -38,6 +38,9 @@ storybook-static
 bin/
 *.test
 
+# IDE / 工具本地配置
+.trae/
+
 # Editor / IDE
 .vscode/
 .idea/

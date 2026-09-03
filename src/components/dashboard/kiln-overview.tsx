@@ -9,6 +9,7 @@ interface SensorData {
   sensor_tag: string;
   sensor_value: number;
   reported_at: string;
+  is_online?: boolean;
 }
 
 interface StatsData {
@@ -31,6 +32,7 @@ interface KilnInfo {
   kiln_id: string;
   deviceCount: number;
   sensorCount: number;
+  onlineCount: number;
   avgTemp: number | null;
   avgPressure: number | null;
 }
@@ -45,6 +47,7 @@ function buildKilnInfos(data: SensorData[], stats: StatsData | null): KilnInfo[]
         kiln_id: d.kiln_id,
         deviceCount: 0,
         sensorCount: 0,
+        onlineCount: 0,
         avgTemp: null,
         avgPressure: null,
       });
@@ -53,11 +56,14 @@ function buildKilnInfos(data: SensorData[], stats: StatsData | null): KilnInfo[]
 
   const devices = new Map<string, Set<string>>();
   const sensorTags = new Map<string, Set<string>>();
+  const onlineTags = new Map<string, Set<string>>();
   data.forEach((d) => {
     if (!devices.has(d.kiln_id)) devices.set(d.kiln_id, new Set());
     if (!sensorTags.has(d.kiln_id)) sensorTags.set(d.kiln_id, new Set());
+    if (!onlineTags.has(d.kiln_id)) onlineTags.set(d.kiln_id, new Set());
     devices.get(d.kiln_id)!.add(d.device_id);
     sensorTags.get(d.kiln_id)!.add(d.sensor_tag);
+    if (d.is_online !== false) onlineTags.get(d.kiln_id)!.add(d.sensor_tag);
   });
 
   const avgByKiln: Record<string, { temp: number[]; pressure: number[] }> = {};
@@ -72,6 +78,7 @@ function buildKilnInfos(data: SensorData[], stats: StatsData | null): KilnInfo[]
     ...k,
     deviceCount: devices.get(k.kiln_id)?.size || 0,
     sensorCount: sensorTags.get(k.kiln_id)?.size || 0,
+    onlineCount: onlineTags.get(k.kiln_id)?.size || 0,
     avgTemp: avgByKiln[k.kiln_id]?.temp.length
       ? avgByKiln[k.kiln_id].temp.reduce((a, b) => a + b, 0) / avgByKiln[k.kiln_id].temp.length
       : null,
@@ -92,48 +99,52 @@ export function KilnOverview({ data, stats }: KilnOverviewProps) {
           {kilns.length} 座
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
         {kilns.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
-            暂无窑体数据
+          <div className="empty-state h-full">
+            <span className="text-sm">暂无窑体数据</span>
+            <span className="empty-hint">连接数据库后，各窑体的设备与传感器统计将在此展示。</span>
           </div>
         ) : (
-          kilns.map((kiln) => (
-            <div
-              key={kiln.kiln_id}
-              className="rounded p-3"
-              style={{
-                background: 'rgba(255,255,255,0.02)',
-                border: '1px solid rgba(204,204,220,0.1)',
-              }}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="status-dot online" />
-                  <span className="text-sm font-semibold text-foreground">{kiln.kiln_id}</span>
+          kilns.map((kiln) => {
+            const healthy = kiln.onlineCount === kiln.sensorCount;
+            return (
+              <div
+                key={kiln.kiln_id}
+                className="rounded p-3"
+                style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  border: '1px solid var(--border)',
+                }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`status-dot ${healthy ? 'online' : 'warning'}`} />
+                    <span className="text-sm font-semibold text-foreground truncate">{kiln.kiln_id}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                    {kiln.deviceCount} 台 · {kiln.onlineCount}/{kiln.sensorCount} 在线
+                  </span>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {kiln.deviceCount} 台 · {kiln.sensorCount} 传感器
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <div className="text-[10px] text-muted-foreground">平均温度</div>
-                  <div className="text-sm font-mono font-bold text-foreground">
-                    {kiln.avgTemp !== null ? kiln.avgTemp.toFixed(1) : '--'}
-                    <span className="text-[10px] text-muted-foreground font-normal"> °C</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div className="text-[10px] text-muted-foreground">平均温度</div>
+                    <div className="text-sm font-mono font-bold text-foreground tabular-nums">
+                      {kiln.avgTemp !== null ? kiln.avgTemp.toFixed(1) : '--'}
+                      <span className="text-[10px] text-muted-foreground font-normal"> °C</span>
+                    </div>
+                  </div>
+                  <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <div className="text-[10px] text-muted-foreground">平均压力</div>
+                    <div className="text-sm font-mono font-bold text-foreground tabular-nums">
+                      {kiln.avgPressure !== null ? kiln.avgPressure.toFixed(1) : '--'}
+                      <span className="text-[10px] text-muted-foreground font-normal"> kPa</span>
+                    </div>
                   </div>
                 </div>
-                <div className="rounded p-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <div className="text-[10px] text-muted-foreground">平均压力</div>
-                  <div className="text-sm font-mono font-bold text-foreground">
-                    {kiln.avgPressure !== null ? kiln.avgPressure.toFixed(1) : '--'}
-                    <span className="text-[10px] text-muted-foreground font-normal"> kPa</span>
-                  </div>
-                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

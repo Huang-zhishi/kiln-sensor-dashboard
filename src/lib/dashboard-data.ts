@@ -2,7 +2,7 @@
 // 所有查询走 queryWithCache，真实查询频率由 TTL 控制
 
 import { queryWithCache, CACHE_TTL } from '@/lib/db';
-import { extractKilnId } from '@/lib/sensor-classifier';
+import { extractKilnId, isSensorOnline } from '@/lib/sensor-classifier';
 
 export interface DashboardParams {
   kiln_id: string;
@@ -205,13 +205,18 @@ export async function fetchDashboardData(p: DashboardParams) {
     ),
   ]);
 
-  const latestData = latestRows.map((r) => ({
+  const now = Date.now();
+  const mapReading = (r: Record<string, unknown>) => ({
     device_id: r.device_id,
     kiln_id: extractKilnId(String(r.sensor_tag || '')),
     sensor_tag: r.sensor_tag,
     sensor_value: Number(r.sensor_value) || 0,
     reported_at: r.ts,
-  }));
+    // 在线判定：LAST(ts) 距 now 超过 60s 视为数据中断（离线）
+    is_online: isSensorOnline(r.ts as string | undefined, now),
+  });
+
+  const latestData = latestRows.map(mapReading);
 
   const kilns = Array.from(new Set(statsRows.map((r) => extractKilnId(String(r.sensor_tag || '')))))
     .filter(Boolean)
@@ -274,6 +279,7 @@ export async function fetchSensorsData(time_range: string) {
     sensor_tag: r.sensor_tag,
     sensor_value: Number(r.sensor_value) || 0,
     reported_at: r.ts,
+    is_online: isSensorOnline(r.ts as string | undefined, Date.now()),
   }));
 
   const history = historyRows.map((r) => ({
@@ -282,6 +288,7 @@ export async function fetchSensorsData(time_range: string) {
     sensor_tag: r.sensor_tag,
     sensor_value: Number(r.sensor_value) || 0,
     reported_at: r.ts,
+    is_online: isSensorOnline(r.ts as string | undefined, Date.now()),
   }));
 
   return { latest, history };

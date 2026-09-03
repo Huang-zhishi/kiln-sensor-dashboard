@@ -27,10 +27,10 @@ interface TrendChartProps {
   candidateTags?: string[];
 }
 
-// Grafana 调色板
+// 系列调色板（与语义色对齐，首位为信息蓝）
 const COLORS = [
-  '#5794f2', '#f2495c', '#ff9830', '#73bf69', '#33a2e5',
-  '#fade2a', '#b877d9', '#ffd166', '#e0752d', '#0ea5e9',
+  '#4da3ff', '#ff4d5e', '#f5a524', '#38c172', '#33a2e5',
+  '#f7c948', '#b877d9', '#ffd166', '#e0752d', '#0ea5e9',
   '#a7c7e7', '#c0a3e6', '#95de64', '#ff85c0', '#5cdbd3', '#d3adf7',
 ];
 
@@ -255,20 +255,20 @@ export function TrendChart({
       legend: {
         type: 'scroll',
         bottom: 0,
-        textStyle: { fontSize: 10, color: '#a1a1a1' },
+        textStyle: { fontSize: 10, color: '#8b96a6' },
         itemWidth: 14,
         itemHeight: 2,
         icon: 'rect',
-        pageIconColor: '#8b8b8b',
-        pageIconInactiveColor: '#555',
-        pageTextStyle: { color: '#8b8b8b' },
+        pageIconColor: '#8b96a6',
+        pageIconInactiveColor: '#3a4250',
+        pageTextStyle: { color: '#8b96a6' },
       },
       tooltip: {
         trigger: 'axis',
-        backgroundColor: '#1f2227',
-        borderColor: 'rgba(204,204,220,0.19)',
+        backgroundColor: '#14181f',
+        borderColor: 'rgba(155,170,192,0.24)',
         borderRadius: 3,
-        textStyle: { fontSize: 11, color: '#e0e0e0' },
+        textStyle: { fontSize: 11, color: '#e8edf4' },
         valueFormatter: (v: unknown) => {
           const num = Number(v);
           return isNaN(num) ? String(v ?? '') : num.toFixed(2);
@@ -277,10 +277,10 @@ export function TrendChart({
       xAxis: {
         type: 'category',
         data: chartData.map((row) => row.time as string),
-        axisLine: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
-        axisTick: { lineStyle: { color: 'rgba(204,204,220,0.15)' } },
+        axisLine: { lineStyle: { color: 'rgba(155,170,192,0.2)' } },
+        axisTick: { lineStyle: { color: 'rgba(155,170,192,0.2)' } },
         axisLabel: {
-          color: '#8b8b8b',
+          color: '#8b96a6',
           fontSize: 10,
           rotate: 20,
           interval: 'auto',
@@ -291,9 +291,9 @@ export function TrendChart({
         type: 'value',
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: 'rgba(204,204,220,0.08)', type: 'dashed' } },
+        splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
         axisLabel: {
-          color: '#8b8b8b',
+          color: '#8b96a6',
           fontSize: 10,
           formatter: (v: number) => {
             if (!isFinite(v)) return '';
@@ -380,7 +380,7 @@ export function TrendChart({
                     style={{
                       background: isSelected ? `${COLORS[idx]}26` : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${isSelected ? COLORS[idx] + '66' : 'rgba(255,255,255,0.08)'}`,
-                      color: isSelected ? COLORS[idx] : '#a1a1a1',
+                      color: isSelected ? COLORS[idx] : 'var(--muted-foreground)',
                     }}
                   >
                     {tag}
@@ -400,8 +400,9 @@ export function TrendChart({
       {/* Chart */}
       <div className="flex-1 min-h-0 px-2 pb-2">
         {chartData.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            暂无数据
+          <div className="empty-state h-full">
+            <span className="text-sm">暂无趋势数据</span>
+            <span className="empty-hint">选择传感器并等待数据推送后，趋势曲线将在此绘制。</span>
           </div>
         ) : (
           <EChart option={chartOption} style={{ width: '100%', height: '100%' }} />

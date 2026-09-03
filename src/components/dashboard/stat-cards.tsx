@@ -8,6 +8,7 @@ interface SensorData {
   sensor_tag: string;
   sensor_value: number;
   reported_at: string;
+  is_online?: boolean;
 }
 
 interface StatsData {
@@ -55,44 +56,86 @@ function AnimatedNumber({ value, format }: { value: number; format?: (n: number)
   return <>{format ? format(display) : Math.round(display).toLocaleString()}</>;
 }
 
+// 统计卡：大数字即论点。左侧语义色条承载状态，主数据等宽 tabular。
 export function StatCards({ data, stats }: StatCardsProps) {
+  const onlineData = data.filter((d) => d.is_online !== false);
+  const totalOnlineSensors = new Set(onlineData.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
+  const totalAllSensors = new Set(data.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
+  const onlineDevices = new Set(onlineData.map((d) => d.device_id)).size;
   const totalDevices = new Set(data.map((d) => d.device_id)).size;
+  const onlineKilns = new Set(onlineData.map((d) => d.kiln_id)).size;
   const totalKilns = new Set(data.map((d) => d.kiln_id)).size;
-  const totalSensors = new Set(data.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
   const totalRecords = stats?.totalRecords || 0;
+  const hasOffline = totalAllSensors > totalOnlineSensors;
 
-  // Calculate average temperature from temperature-related sensors
-  const tempSensors = data.filter((d) =>
-    d.sensor_tag.toLowerCase().includes('temp') ||
-    d.sensor_tag.toLowerCase().includes('温度')
+  // 平均温度：只统计在线温度类传感器（温度 / temp 两类命名）
+  const tempSensors = onlineData.filter(
+    (d) =>
+      d.sensor_tag.toLowerCase().includes('temp') ||
+      d.sensor_tag.toLowerCase().includes('温度')
   );
   const avgTempValue = tempSensors.length > 0
     ? tempSensors.reduce((sum, d) => sum + d.sensor_value, 0) / tempSensors.length
     : null;
 
+  // tone：hero(烬金) / success(在线健康) / warning(存在离线) / neutral
   const cards = [
-    { label: '数据总量', value: <AnimatedNumber value={totalRecords} />, unit: '条' },
-    { label: '在线窑体', value: <AnimatedNumber value={totalKilns} />, unit: '座' },
-    { label: '在线设备', value: <AnimatedNumber value={totalDevices} />, unit: '台' },
-    { label: '传感器数', value: <AnimatedNumber value={totalSensors} />, unit: '个' },
+    {
+      label: '数据总量',
+      tone: 'neutral' as const,
+      value: <AnimatedNumber value={totalRecords} />,
+      unit: '条',
+    },
+    {
+      label: '在线窑体',
+      tone: hasOffline ? 'warning' as const : 'success' as const,
+      value: <AnimatedNumber value={onlineKilns} />,
+      unit: `/ ${totalKilns} 座`,
+    },
+    {
+      label: '在线设备',
+      tone: hasOffline ? 'warning' as const : 'success' as const,
+      value: <AnimatedNumber value={onlineDevices} />,
+      unit: `/ ${totalDevices} 台`,
+    },
+    {
+      label: '在线传感器',
+      tone: hasOffline ? 'warning' as const : 'success' as const,
+      value: <AnimatedNumber value={totalOnlineSensors} />,
+      unit: `/ ${totalAllSensors} 个`,
+    },
     {
       label: '平均温度',
-      value: avgTempValue === null
-        ? '--'
-        : <AnimatedNumber value={avgTempValue} format={(n) => n.toFixed(1)} />,
+      tone: 'hero' as const,
+      value:
+        avgTempValue === null
+          ? '--'
+          : <AnimatedNumber value={avgTempValue} format={(n) => n.toFixed(1)} />,
       unit: '°C',
     },
   ];
 
+  const toneBar: Record<string, string> = {
+    hero: 'var(--primary)',
+    success: 'var(--success)',
+    warning: 'var(--warning)',
+    neutral: 'var(--border-strong)',
+  };
+
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-      {cards.map((card) => (
-        <div key={card.label} className="panel px-4 py-3">
-          <div className="text-xs text-muted-foreground mb-1.5 truncate">
-            {card.label}
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-bold font-mono text-foreground number-transition leading-none">
+      {cards.map((card, i) => (
+        <div
+          key={card.label}
+          className="stat-card px-4 py-3 reveal"
+          style={{ animationDelay: `${i * 40}ms`, borderTopColor: toneBar[card.tone] }}
+        >
+          <div className="text-xs text-muted-foreground mb-1.5 truncate">{card.label}</div>
+          <div className="flex items-baseline gap-1.5">
+            <span
+              className="text-[26px] font-bold font-mono leading-none tabular-nums number-transition"
+              style={{ color: card.tone === 'hero' ? 'var(--primary)' : 'var(--foreground)' }}
+            >
               {card.value}
             </span>
             <span className="text-xs text-muted-foreground">{card.unit}</span>

@@ -8,7 +8,6 @@ import { TrendChart } from '@/components/dashboard/trend-chart';
 import { KilnOverview } from '@/components/dashboard/kiln-overview';
 import { DataTable } from '@/components/dashboard/data-table';
 import { AlarmList } from '@/components/dashboard/alarm-list';
-import { ScreenScaler } from '@/components/dashboard/screen-scaler';
 import { DashboardSkeleton } from '@/components/dashboard/panel-skeleton';
 
 interface SensorData {
@@ -64,18 +63,23 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTrendTags, stats]);
 
+  // 稳定键：effect 依赖原语字符串而非数组引用，避免 stats 高频更新导致 SSE 连接反复重建
+  const trendTagsKey = effectiveTrendTags.join(',');
+
   // SSE 实时订阅：服务端单点查询 + 广播，相同筛选参数的观众共享一次查询
   // connNonce 仅用于手动刷新时重建连接
   const [connNonce, setConnNonce] = useState(0);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams();
     params.set('time_range', timeRange);
     if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
     // 趋势图只订阅选中传感器的历史；空选择时显式传空，避免回退全量查询
-    params.set('sensors', effectiveTrendTags.join(','));
+    params.set('sensors', trendTagsKey);
 
     const es = new EventSource(`/api/stream?${params}`);
+    es.onopen = () => setConnected(true);
     es.onmessage = (e) => {
       try {
         const json = JSON.parse(e.data);
@@ -83,23 +87,25 @@ export default function DashboardPage() {
         setHistoryData(json.history);
         setStats(json.stats);
         setLastUpdate(new Date());
+        setConnected(true);
         setLoading(false);
       } catch {
         // 忽略无法解析的帧
       }
     };
     es.onerror = () => {
-      // EventSource 断线自动重连（retry: 3000）
+      // EventSource 断线自动重连（retry: 3000），此处仅标记连接态
+      setConnected(false);
     };
 
     return () => es.close();
-  }, [filters, timeRange, effectiveTrendTags, connNonce]);
+  }, [filters, timeRange, trendTagsKey, connNonce]);
 
   const handleRefresh = useMemo(() => () => setConnNonce((n) => n + 1), []);
 
   return (
-    <ScreenScaler>
-      <DashboardHeader lastUpdate={lastUpdate} onRefresh={handleRefresh} loading={loading} />
+    <div className="flex min-h-screen flex-col bg-background">
+      <DashboardHeader lastUpdate={lastUpdate} onRefresh={handleRefresh} loading={loading} connected={connected} />
 
       {loading && latestData.length === 0 ? (
         <DashboardSkeleton />
@@ -113,15 +119,16 @@ export default function DashboardPage() {
 
         <StatCards data={latestData} stats={stats} />
 
-        {/* 三段式布局：左窑体概览 / 中趋势图(黄金区) / 右告警列表 */}
-        <div className="grid grid-cols-12 gap-3">
+        {/* 三段式布局：左窑体概览 / 中趋势图(黄金区) / 右告警列表
+            行高随视口自适应（44vh，360~600px 限幅），面板内部滚动 */}
+        <div className="grid grid-cols-12 gap-3 lg:h-[clamp(360px,44vh,600px)] lg:grid-rows-[minmax(0,1fr)]">
           {/* Left: Kiln Overview */}
-          <div className="col-span-12 lg:col-span-3">
+          <div className="col-span-12 h-[320px] min-h-0 lg:col-span-3 lg:h-auto">
             <KilnOverview data={latestData} stats={stats} />
           </div>
 
           {/* Center: Trend Chart (golden area) */}
-          <div className="col-span-12 lg:col-span-6">
+          <div className="col-span-12 h-[420px] min-h-0 lg:col-span-6 lg:h-auto">
             <TrendChart
               data={historyData}
               timeRange={timeRange}
@@ -134,7 +141,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Right: Alarms */}
-          <div className="col-span-12 lg:col-span-3">
+          <div className="col-span-12 h-[360px] min-h-0 lg:col-span-3 lg:h-auto">
             <AlarmList data={latestData} />
           </div>
         </div>
@@ -143,6 +150,6 @@ export default function DashboardPage() {
         <DataTable data={latestData} />
         </div>
       )}
-    </ScreenScaler>
+    </div>
   );
 }
