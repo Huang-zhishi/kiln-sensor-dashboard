@@ -35,6 +35,10 @@ COPY --from=build /app/public ./public
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# @tdengine/websocket 在 import 时向 ./logs 写滚动日志（相对 CWD=/app），
+# 非 root 用户需预建可写目录，否则模块加载报 EACCES
+RUN mkdir -p /app/logs && chown nextjs:nodejs /app/logs
+
 USER nextjs
 EXPOSE 3000
 
