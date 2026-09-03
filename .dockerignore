@@ -1,0 +1,21 @@
+# 依赖与构建产物（容器内重新安装/构建）
+node_modules
+.next
+.pnpm-store
+
+# 版本控制
+.git
+.gitignore
+
+# 环境变量（凭据绝不打进镜像，运行时由 compose 注入）
+.env
+.env.*
+
+# 日志与临时文件
+*.log
+logs
+output.log
+
+# 文档
+*.md
+!README.md

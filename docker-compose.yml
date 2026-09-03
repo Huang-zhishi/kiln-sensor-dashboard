@@ -1,0 +1,19 @@
+# 窑炉传感器大屏 - 生产部署
+# 用法：docker compose up -d --build
+
+services:
+  kiln-dashboard:
+    build: .
+    image: kiln-dashboard:latest
+    container_name: kiln-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"   # 仅本机回环，外部经 nginx 反代访问
+    env_file: .env              # TDengine 凭据等敏感配置，容器启动时注入
+    environment:
+      - TZ=Asia/Shanghai
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"         # 防日志无限增长撑爆小内存服务器
+        max-file: "3"
