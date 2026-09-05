@@ -80,6 +80,8 @@ export default function SensorsPage() {
   }, [onlineData]);
 
   // 根据选中的类型过滤传感器；在线优先，离线置底
+  // 组内按「设备 ID + 点位」固定排序——不能按 reported_at 排，
+  // 否则每台设备上报时间不同，每次推送都会打乱卡片顺序
   const filteredSensors = useMemo(() => {
     const byType = activeType === 'all'
       ? latestData
@@ -89,7 +91,10 @@ export default function SensorsPage() {
       const oa = a.is_online === false ? 1 : 0;
       const ob = b.is_online === false ? 1 : 0;
       if (oa !== ob) return oa - ob;
-      return new Date(b.reported_at).getTime() - new Date(a.reported_at).getTime();
+      return (
+        a.device_id.localeCompare(b.device_id) ||
+        a.sensor_tag.localeCompare(b.sensor_tag)
+      );
     });
   }, [latestData, activeType, hideOffline]);
 

@@ -79,7 +79,12 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
         axisLine: { show: false },
         axisTick: { show: false },
         splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
-        axisLabel: { color: '#8b96a6', fontSize: 10 },
+        axisLabel: {
+          color: '#8b96a6',
+          fontSize: 10,
+          // 固定两位小数，避免 ECharts 默认输出超长浮点
+          formatter: (v: number) => v.toFixed(2),
+        },
       },
       series: [
         {
