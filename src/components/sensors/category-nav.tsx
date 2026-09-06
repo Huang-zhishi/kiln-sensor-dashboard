@@ -9,7 +9,8 @@ import {
   Droplets,
   FlaskConical,
   Beaker,
-  Activity,
+  Zap,
+  ToggleLeft,
   CircleDot,
   type LucideIcon,
 } from 'lucide-react';
@@ -30,7 +31,8 @@ const TYPE_ICONS: Record<SensorType, LucideIcon> = {
   '液位': Droplets,
   '成分检测': FlaskConical,
   'pH值': Beaker,
-  '设备状态': Activity,
+  '电流': Zap,
+  '开关': ToggleLeft,
   '其他': CircleDot,
 };
 

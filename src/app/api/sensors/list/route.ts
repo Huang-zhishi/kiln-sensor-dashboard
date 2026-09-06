@@ -42,7 +42,7 @@ export async function GET() {
 
     const typeCount: Record<SensorType, number> = {
       '温度': 0, '压力': 0, '流量': 0, '阀位': 0, '液位': 0,
-      '成分检测': 0, 'pH值': 0, '设备状态': 0, '其他': 0,
+      '成分检测': 0, 'pH值': 0, '电流': 0, '开关': 0, '其他': 0,
     };
 
     const data = rows.map((r) => {

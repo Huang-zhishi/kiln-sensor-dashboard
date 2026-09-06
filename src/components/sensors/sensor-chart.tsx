@@ -28,6 +28,8 @@ function shortDeviceId(id: string): string {
 
 export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
+  // 开关量（0/1）：轴与数值显示「关/开」而非数字
+  const isSwitch = type === '开关';
 
   // 使用 useMemo 缓存计算结果，避免不必要的重计算
   const { formatTime, latestValue, yDomain, chartData, chartOption } = useMemo(() => {
@@ -44,11 +46,17 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
     const latestValue = data.length > 0 ? data[data.length - 1].sensor_value : 0;
 
     // 计算 Y 轴范围（使用固定范围避免重绘）
-    const values = data.map((d) => Number(d.sensor_value)).filter((v) => !isNaN(v) && isFinite(v));
-    const minVal = values.length > 0 ? Math.min(...values) : 0;
-    const maxVal = values.length > 0 ? Math.max(...values) : 0;
-    const padding = (maxVal - minVal) * 0.1 || 1;
-    const yDomain: [number, number] = [minVal - padding, maxVal + padding];
+    // 开关量固定 -0.5 ~ 1.5，刻度落在 0/1 上显示「关/开」
+    let yDomain: [number, number];
+    if (isSwitch) {
+      yDomain = [-0.5, 1.5];
+    } else {
+      const values = data.map((d) => Number(d.sensor_value)).filter((v) => !isNaN(v) && isFinite(v));
+      const minVal = values.length > 0 ? Math.min(...values) : 0;
+      const maxVal = values.length > 0 ? Math.max(...values) : 0;
+      const padding = (maxVal - minVal) * 0.1 || 1;
+      yDomain = [minVal - padding, maxVal + padding];
+    }
 
     // 使用稳定的数据引用
     const chartData = data;
@@ -63,7 +71,10 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
         borderColor: 'rgba(155,170,192,0.24)',
         borderRadius: 3,
         textStyle: { fontSize: 12 },
-        valueFormatter: (v: unknown) => `${Number(v).toFixed(2)} ${unit}`,
+        valueFormatter: (v: unknown) =>
+          isSwitch
+            ? Number(v) >= 0.5 ? '开' : '关'
+            : `${Number(v).toFixed(2)} ${unit}`,
       },
       xAxis: {
         type: 'category',
@@ -72,26 +83,42 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
         axisTick: { show: false },
         axisLabel: { color: '#8b96a6', fontSize: 10, hideOverlap: true },
       },
-      yAxis: {
-        type: 'value',
-        min: yDomain[0],
-        max: yDomain[1],
-        axisLine: { show: false },
-        axisTick: { show: false },
-        splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
-        axisLabel: {
-          color: '#8b96a6',
-          fontSize: 10,
-          // 固定两位小数，避免 ECharts 默认输出超长浮点
-          formatter: (v: number) => v.toFixed(2),
-        },
-      },
+      yAxis: isSwitch
+        ? {
+            type: 'value',
+            min: yDomain[0],
+            max: yDomain[1],
+            interval: 0.5,
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
+            axisLabel: {
+              color: '#8b96a6',
+              fontSize: 10,
+              formatter: (v: number) => (v === 0 ? '关' : v === 1 ? '开' : ''),
+            },
+          }
+        : {
+            type: 'value',
+            min: yDomain[0],
+            max: yDomain[1],
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
+            axisLabel: {
+              color: '#8b96a6',
+              fontSize: 10,
+              // 固定两位小数，避免 ECharts 默认输出超长浮点
+              formatter: (v: number) => v.toFixed(2),
+            },
+          },
       series: [
         {
           name,
           type: 'line',
           data: chartData.map((d) => d.sensor_value),
           showSymbol: false,
+          step: isSwitch ? 'end' : false,
           lineStyle: { width: 2, color },
           color,
         },
@@ -99,7 +126,7 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
     };
 
     return { formatTime, latestValue, yDomain, chartData, chartOption };
-  }, [data, color, name, unit]);
+  }, [data, color, name, unit, isSwitch]);
 
   return (
     <div
@@ -130,9 +157,18 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
         </div>
         {isOnline ? (
           <div className="text-right">
-            <div className="text-lg font-bold font-mono" style={{ color }}>
-              {latestValue.toFixed(1)}
-            </div>
+            {isSwitch ? (
+              <div
+                className="text-lg font-bold"
+                style={{ color: latestValue >= 0.5 ? '#38c172' : 'var(--muted-foreground)' }}
+              >
+                {latestValue >= 0.5 ? '开' : '关'}
+              </div>
+            ) : (
+              <div className="text-lg font-bold font-mono" style={{ color }}>
+                {latestValue.toFixed(1)}
+              </div>
+            )}
             <div className="text-xs text-muted-foreground">{unit}</div>
           </div>
         ) : (
@@ -155,7 +191,7 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
       <div className="flex items-center justify-between mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
         <span>数据点: {data.length}</span>
         <span>
-          范围: {yDomain[0].toFixed(1)} ~ {yDomain[1].toFixed(1)}
+          范围: {isSwitch ? '关 ~ 开' : `${yDomain[0].toFixed(1)} ~ ${yDomain[1].toFixed(1)}`}
         </span>
       </div>
     </div>

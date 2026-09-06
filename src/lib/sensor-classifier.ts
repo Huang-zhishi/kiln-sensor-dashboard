@@ -9,7 +9,8 @@ export type SensorType =
   | '液位'
   | '成分检测'
   | 'pH值'
-  | '设备状态'
+  | '电流'
+  | '开关'
   | '其他';
 
 // 传感器类型语义色（与设计 token 对齐，低饱和、可辨性优先）
@@ -21,13 +22,14 @@ export const SENSOR_TYPE_COLORS: Record<SensorType, string> = {
   '液位': '#4da3ff',      // 蓝 - 液体
   '成分检测': '#38c172',  // 绿 - 成分
   'pH值': '#f7c948',      // 沙黄 - 化学
-  '设备状态': '#8b96a6',  // 灰 - 状态
+  '电流': '#f472b6',      // 粉 - 电流
+  '开关': '#8b96a6',      // 灰 - 开关量
   '其他': '#6b7280',      // 深灰 - 默认
 };
 
 export const SENSOR_TYPES: SensorType[] = [
   '温度', '压力', '流量', '阀位', '液位',
-  '成分检测', 'pH值', '设备状态', '其他'
+  '成分检测', 'pH值', '电流', '开关', '其他'
 ];
 
 export type SensorLevel = 'normal' | 'warning' | 'danger';
@@ -66,7 +68,8 @@ export const UNIT_MAP: Record<SensorType, string> = {
   '液位': 'm',
   '成分检测': '%',
   'pH值': 'pH',
-  '设备状态': '',
+  '电流': 'A',
+  '开关': '',
   '其他': '',
 };
 
@@ -110,8 +113,13 @@ const CLASSIFICATION_RULES: Array<{ keywords: string[]; type: SensorType }> = [
     type: 'pH值',
   },
   {
-    keywords: ['振动', '电流', '运行', '状态'],
-    type: '设备状态',
+    keywords: ['电流'],
+    type: '电流',
+  },
+  {
+    // 开关量信号：运行状态/运行信号/补料超时等 0-1 值
+    keywords: ['状态', '信号', '超时', '振动'],
+    type: '开关',
   },
 ];
 
@@ -144,7 +152,8 @@ export function classifySensors(sensorTags: string[]): Record<SensorType, string
     '液位': [],
     '成分检测': [],
     'pH值': [],
-    '设备状态': [],
+    '电流': [],
+    '开关': [],
     '其他': [],
   };
 
