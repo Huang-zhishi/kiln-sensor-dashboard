@@ -113,3 +113,31 @@ export function deleteMeta(tag: string): boolean {
   saveMetaMap(map);
   return true;
 }
+
+export interface BatchPatch {
+  maintenance?: boolean;
+  enabled?: boolean;
+  suspect?: boolean;
+}
+
+/** 批量设置布尔字段（一次读、一次写）；tag 保留原样不做 trim。返回实际更新条数。 */
+export function batchSetMeta(tags: string[], patch: BatchPatch): number {
+  const map = loadMetaMap();
+  const now = new Date().toISOString();
+  let n = 0;
+  for (const raw of tags) {
+    const tag = String(raw ?? '');
+    if (!tag.trim() || tag.length > 128) continue;
+    const base = map[tag] ?? defaultMeta(tag);
+    map[tag] = {
+      ...base,
+      maintenance: patch.maintenance !== undefined ? patch.maintenance : base.maintenance,
+      enabled: patch.enabled !== undefined ? patch.enabled : base.enabled,
+      suspect: patch.suspect !== undefined ? patch.suspect : base.suspect,
+      updated_at: now,
+    };
+    n++;
+  }
+  saveMetaMap(map);
+  return n;
+}
