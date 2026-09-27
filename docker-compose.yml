@@ -12,6 +12,9 @@ services:
     env_file: .env              # TDengine 凭据等敏感配置，容器启动时注入
     environment:
       - TZ=Asia/Shanghai
+    volumes:
+      # 运行期上传的工艺流程图 + 元数据持久化：整目录挂载，重建容器（--build）不丢
+      - ./data/process/imports:/app/public/imports
     logging:
       driver: json-file
       options:

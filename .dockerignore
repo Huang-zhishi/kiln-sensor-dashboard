@@ -16,6 +16,9 @@ node_modules
 logs
 output.log
 
+# 运行期持久化数据（工艺流程图/元数据），不入构建上下文
+data
+
 # 文档
 *.md
 !README.md

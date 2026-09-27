@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-const SYSTEMS_FILE = path.join(process.cwd(), 'public', 'process-systems.json');
+const SYSTEMS_FILE = path.join(process.cwd(), 'public', 'imports', 'process-systems.json');
 // 与 systems/route.ts 的 IMPORTS_DIR 保持一致，确保删除时可找到文件
 const IMPORTS_DIR = path.join(process.cwd(), 'public', 'imports');
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB 上限

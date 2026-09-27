@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
-const SYSTEMS_FILE = path.join(process.cwd(), 'public', 'process-systems.json');
+const SYSTEMS_FILE = path.join(process.cwd(), 'public', 'imports', 'process-systems.json');
 const IMPORTS_DIR = path.join(process.cwd(), 'public', 'imports');
 
 interface ProcessSystem {
