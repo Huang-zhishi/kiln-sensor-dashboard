@@ -3,6 +3,7 @@
 // 结果变化才推送；无客户端时自动停表
 
 import { fetchDashboardData, fetchSensorsData } from '@/lib/dashboard-data';
+import { ensureAlertEngine } from '@/lib/alert-engine';
 
 interface Client {
   write: (chunk: string) => void;
@@ -22,6 +23,11 @@ class SseHub {
   private groups = new Map<string, Group>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+
+  constructor() {
+    // 告警引擎随服务进程常驻（单例定时器）
+    ensureAlertEngine();
+  }
 
   subscribe(key: string, params: Record<string, string>, client: Client) {
     let group = this.groups.get(key);

@@ -14,6 +14,7 @@ import { EChart } from '@/components/charts/echarts';
 import { SensorPicker, type SensorOption } from '@/components/history/sensor-picker';
 import { classifySensor, SENSOR_TYPE_COLORS, UNIT_MAP, type SensorType } from '@/lib/sensor-classifier';
 import { intervalLabel, localInputToMs } from '@/lib/time-range';
+import type { SensorMetaMap } from '@/lib/sensor-meta-types';
 
 interface HistoryPoint {
   device_id: string;
@@ -77,6 +78,7 @@ export default function HistoryPage() {
   const [sensors, setSensors] = useState<SensorOption[]>([]);
   const [loadingSensors, setLoadingSensors] = useState(true);
   const [selected, setSelected] = useState<SensorOption | null>(null);
+  const [metaMap, setMetaMap] = useState<SensorMetaMap>({});
 
   const [mode, setMode] = useState<'day' | 'range'>('day');
   const [day, setDay] = useState<string>(() => todayStr());
@@ -129,6 +131,16 @@ export default function HistoryPage() {
     };
   }, []);
 
+  // 测点主数据（单位/别名/量程覆盖）
+  useEffect(() => {
+    fetch('/api/sensors/meta')
+      .then((r) => r.json())
+      .then((j) => {
+        if (j?.success) setMetaMap(j.meta || {});
+      })
+      .catch(() => {});
+  }, []);
+
   const doQuery = useCallback(async () => {
     if (!selected) return;
     let win: { start: number; end: number } | null;
@@ -178,7 +190,9 @@ export default function HistoryPage() {
   }, [selected]);
 
   const sensorType: SensorType = selected ? classifySensor(selected.sensor_tag) : '其他';
-  const unit = selected?.unit || UNIT_MAP[sensorType] || '';
+  const sensorMeta = selected ? metaMap[selected.sensor_tag] : null;
+  const unit = sensorMeta?.unit?.trim() || selected?.unit || UNIT_MAP[sensorType] || '';
+  const displayName = sensorMeta?.alias?.trim() || selected?.sensor_tag || '';
   const isSwitch = sensorType === '开关';
 
   const stats = useMemo(() => {
@@ -235,6 +249,7 @@ export default function HistoryPage() {
         : {
             type: 'value',
             scale: true,
+            ...(sensorMeta && sensorMeta.range_min !== null && sensorMeta.range_max !== null ? { min: sensorMeta.range_min, max: sensorMeta.range_max } : {}),
             axisLine: { show: false },
             splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
             axisLabel: { color: '#8b96a6', fontSize: 10, formatter: (v: number) => (v >= 1000 ? v.toFixed(0) : v.toFixed(2)) },
@@ -269,7 +284,7 @@ export default function HistoryPage() {
         },
       ],
     };
-  }, [points, sensorType, unit, isSwitch, selected]);
+  }, [points, sensorType, unit, isSwitch, selected, sensorMeta]);
 
   const exportCsv = () => {
     if (!selected || !points.length) return;
@@ -307,12 +322,32 @@ export default function HistoryPage() {
             选择单个测点与时间段，查看历史趋势
           </span>
         </div>
-        <Link
-          href="/sensors"
-          className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-        >
-          传感器总览
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/alerts"
+            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+          >
+            告警中心
+          </Link>
+          <Link
+            href="/reports"
+            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+          >
+            报表中心
+          </Link>
+          <Link
+            href="/tags"
+            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+          >
+            测点主数据
+          </Link>
+          <Link
+            href="/sensors"
+            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+          >
+            传感器总览
+          </Link>
+        </div>
       </header>
 
       <main className="flex-1 p-4 space-y-3">
@@ -452,7 +487,10 @@ export default function HistoryPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2 h-2 rounded-full" style={{ background: SENSOR_TYPE_COLORS[sensorType] || '#8b96a6' }} />
-                  <span className="text-sm font-medium text-foreground truncate">{selected.sensor_tag}</span>
+                  <span className="text-sm font-medium text-foreground truncate">{displayName}</span>
+                  {displayName !== selected.sensor_tag && (
+                    <span className="text-[11px] text-muted-foreground font-mono truncate">{selected.sensor_tag}</span>
+                  )}
                   <span className="text-xs text-muted-foreground">{sensorType}{unit ? ` · ${unit}` : ''}</span>
                   {meta?.interval && <span className="text-[11px] text-muted-foreground">聚合 {intervalLabel(meta.interval)}</span>}
                 </div>

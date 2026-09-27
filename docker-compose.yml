@@ -15,6 +15,8 @@ services:
     volumes:
       # 运行期上传的工艺流程图 + 元数据持久化：整目录挂载，重建容器（--build）不丢
       - ./data/process/imports:/app/public/imports
+      # 运行期配置（告警规则 / 测点元数据 / 告警活动态）持久化
+      - ./data/config:/app/data/config
     logging:
       driver: json-file
       options:

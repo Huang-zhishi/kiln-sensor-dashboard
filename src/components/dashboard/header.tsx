@@ -76,6 +76,24 @@ export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = tr
             <div className="text-sm font-mono text-foreground tabular-nums">{timeStr || '--:--:--'}</div>
           </div>
           <Link
+            href="/alerts"
+            className="px-3 py-1.5 rounded text-sm font-medium bg-card border border-border-strong text-foreground hover:bg-card-hover transition-colors"
+          >
+            告警中心
+          </Link>
+          <Link
+            href="/reports"
+            className="px-3 py-1.5 rounded text-sm font-medium bg-card border border-border-strong text-foreground hover:bg-card-hover transition-colors"
+          >
+            报表中心
+          </Link>
+          <Link
+            href="/tags"
+            className="px-3 py-1.5 rounded text-sm font-medium bg-card border border-border-strong text-foreground hover:bg-card-hover transition-colors"
+          >
+            测点主数据
+          </Link>
+          <Link
             href="/history"
             className="px-3 py-1.5 rounded text-sm font-medium bg-card border border-border-strong text-foreground hover:bg-card-hover transition-colors"
           >

@@ -12,6 +12,7 @@ import {
   localInputToMs,
   msToLocalInput,
 } from '@/lib/time-range';
+import type { SensorMetaMap } from '@/lib/sensor-meta-types';
 
 interface SensorReading {
   device_id: string;
@@ -44,6 +45,7 @@ export default function SensorsPage() {
   const [hideOffline, setHideOffline] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [referenceMap, setReferenceMap] = useState<Record<string, { mn: number; mx: number; av: number }>>({});
+  const [metaMap, setMetaMap] = useState<SensorMetaMap>({});
 
   // SSE 实时订阅：最新数据每 2s 推送，历史随服务端缓存（15s）自动刷新
   useEffect(() => {
@@ -82,13 +84,19 @@ export default function SensorsPage() {
     return () => es.close();
   }, [timeRange, customRange]);
 
-  // 历史参考区间（全量统计，服务端缓存 10 分钟）
+  // 历史参考区间（全量统计，服务端缓存 10 分钟）+ 测点主数据
   useEffect(() => {
     let cancelled = false;
     fetch('/api/sensors/reference')
       .then((r) => r.json())
       .then((j) => {
         if (!cancelled && j.success) setReferenceMap(j.references || {});
+      })
+      .catch(() => {});
+    fetch('/api/sensors/meta')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.success) setMetaMap(j.meta || {});
       })
       .catch(() => {});
     return () => {
@@ -116,7 +124,9 @@ export default function SensorsPage() {
     const byType = activeType === 'all'
       ? latestData
       : latestData.filter((item) => classifySensor(item.sensor_tag) === activeType);
-    const visible = hideOffline ? byType.filter((d) => d.is_online !== false) : byType;
+    // 测点主数据：停用测点不展示
+    const enabledOnly = byType.filter((item) => metaMap[item.sensor_tag]?.enabled !== false);
+    const visible = hideOffline ? enabledOnly.filter((d) => d.is_online !== false) : enabledOnly;
     const q = searchQuery.trim().toLowerCase();
     const searched = q ? visible.filter((d) => d.sensor_tag.toLowerCase().includes(q)) : visible;
     return [...searched].sort((a, b) => {
@@ -128,7 +138,7 @@ export default function SensorsPage() {
         a.sensor_tag.localeCompare(b.sensor_tag)
       );
     });
-  }, [latestData, activeType, hideOffline, searchQuery]);
+  }, [latestData, activeType, hideOffline, searchQuery, metaMap]);
 
   const handleRangeSelect = (value: string) => {
     setTimeRange(value);
@@ -185,6 +195,27 @@ export default function SensorsPage() {
                 className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
               >
                 历史查询
+              </Link>
+
+              <Link
+                href="/alerts"
+                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+              >
+                告警中心
+              </Link>
+
+              <Link
+                href="/reports"
+                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+              >
+                报表中心
+              </Link>
+
+              <Link
+                href="/tags"
+                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+              >
+                测点主数据
               </Link>
 
               <h1 className="text-lg font-semibold text-foreground truncate">
@@ -303,18 +334,26 @@ export default function SensorsPage() {
                 {filteredSensors.map((sensor) => {
                   const sensorType = classifySensor(sensor.sensor_tag);
                   const online = sensor.is_online !== false;
+                  const meta = metaMap[sensor.sensor_tag];
+                  const displayName = meta?.alias?.trim() || sensor.sensor_tag;
+                  const name = meta?.maintenance ? `${displayName} · 检修` : displayName;
+                  const unit = meta?.unit?.trim() || UNIT_MAP[sensorType];
+                  const rangeRef =
+                    meta && meta.range_min !== null && meta.range_max !== null
+                      ? { mn: meta.range_min, mx: meta.range_max, av: referenceMap[sensor.sensor_tag]?.av ?? 0 }
+                      : referenceMap[sensor.sensor_tag];
                   return (
                     <LazyLoad key={`${sensor.device_id}-${sensor.sensor_tag}`}>
                       <SensorChart
-                        name={sensor.sensor_tag}
+                        name={name}
                         deviceId={sensor.device_id}
                         type={sensorType}
                         data={historyData[`${sensor.device_id}|${sensor.sensor_tag}`] || []}
-                        unit={UNIT_MAP[sensorType]}
+                        unit={unit}
                         isOnline={online}
                         lastReport={online ? undefined : new Date(sensor.reported_at).toLocaleString('zh-CN')}
-                        suspect={isSuspectReading(Number(sensor.sensor_value))}
-                        reference={referenceMap[sensor.sensor_tag]}
+                        suspect={meta?.suspect || isSuspectReading(Number(sensor.sensor_value))}
+                        reference={rangeRef}
                       />
                     </LazyLoad>
                   );

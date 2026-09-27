@@ -37,7 +37,8 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # @tdengine/websocket 在 import 时向 ./logs 写滚动日志（相对 CWD=/app），
 # 非 root 用户需预建可写目录，否则模块加载报 EACCES
-RUN mkdir -p /app/logs && chown nextjs:nodejs /app/logs
+# data/config 用于运行期配置（告警规则/测点元数据）持久化
+RUN mkdir -p /app/logs /app/data/config && chown -R nextjs:nodejs /app/logs /app/data
 
 USER nextjs
 EXPOSE 3000
