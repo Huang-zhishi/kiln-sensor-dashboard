@@ -14,7 +14,7 @@ function escapeSql(s: string): string {
 async function loadItem(eventKey: string): Promise<Record<string, unknown> | null> {
   const sql = `
     SELECT ts, event_key, sensor_tag, sensor_value, direction,
-           baseline_min, baseline_max, device_id, kiln_id, report, analyzed_at
+           baseline_min, baseline_max, device_id, kiln_id, report, note, analyzed_at
     FROM anomaly_events
     WHERE event_key = '${escapeSql(eventKey)}'
     ORDER BY ts DESC

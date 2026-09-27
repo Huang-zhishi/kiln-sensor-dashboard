@@ -28,7 +28,7 @@ export async function GET(request: Request) {
 
   const sql = `
     SELECT ts, event_key, sensor_tag, sensor_value, direction,
-           baseline_min, baseline_max, device_id, kiln_id,
+           baseline_min, baseline_max, device_id, kiln_id, note,
            CASE WHEN report IS NULL OR report = '' THEN 0 ELSE 1 END AS has_report
     FROM anomaly_events
     WHERE ${where.join(' AND ')}

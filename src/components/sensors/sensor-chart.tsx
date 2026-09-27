@@ -21,6 +21,8 @@ interface SensorChartProps {
   deviceId?: string;
   /** 疑似坏点（最新值命中已知哨兵值） */
   suspect?: boolean;
+  /** 历史参考区间（全量统计） */
+  reference?: { mn: number; mx: number; av: number };
 }
 
 // 设备 ID 通常为长随机串，缩略展示（完整值放 title）
@@ -28,7 +30,7 @@ function shortDeviceId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
 
-export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId, suspect = false }: SensorChartProps) {
+export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId, suspect = false, reference }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
   // 开关量（0/1）：轴与数值显示「关/开」而非数字
   const isSwitch = type === '开关';
@@ -177,6 +179,11 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
               </div>
             )}
             <div className="text-xs text-muted-foreground">{unit}</div>
+            {reference && isFinite(reference.mn) && isFinite(reference.mx) && (
+              <div className="text-[9px] text-muted-foreground" title="历史参考区间（全量统计）">
+                参考 {reference.mn.toFixed(1)}~{reference.mx.toFixed(1)}
+              </div>
+            )}
           </div>
         ) : (
           <div className="text-right">

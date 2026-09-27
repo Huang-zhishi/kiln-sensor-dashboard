@@ -48,6 +48,7 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
   const [status, setStatus] = useState<'acked' | 'new'>('new');
   const [saving, setSaving] = useState(false);
   const [trendPoints, setTrendPoints] = useState<Array<{ ts: string; sensor_value: number }>>([]);
+  const [reference, setReference] = useState<{ mn: number; mx: number; av: number } | null>(null);
 
   useEffect(() => {
     if (!eventKey) {
@@ -101,6 +102,22 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
       cancelled = true;
     };
   }, [sensorTag, eventTs]);
+
+  // 当前历史参考区间（全量统计，服务端缓存 10 分钟）
+  useEffect(() => {
+    setReference(null);
+    if (!sensorTag) return;
+    let cancelled = false;
+    fetch('/api/sensors/reference')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.success) setReference(j.references?.[sensorTag] || null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sensorTag]);
 
   const toggleAck = async () => {
     if (!eventKey || saving) return;
@@ -256,6 +273,14 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                     {String(item?.device_id || '--')} · {String(item?.kiln_id || '--')}
                   </div>
                 </div>
+                <div className="col-span-2">
+                  <div className="text-muted-foreground text-[10px]">当前历史参考（全量统计）</div>
+                  <div className="font-mono tabular-nums">
+                    {reference
+                      ? `${reference.mn.toFixed(2)} ~ ${reference.mx.toFixed(2)} ${unit}（均值 ${reference.av.toFixed(2)}）`
+                      : '加载中…'}
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -292,7 +317,9 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
               ) : (
                 <div className="empty-state py-8" style={{ minHeight: 'auto' }}>
                   <span className="text-sm">暂无分析报告</span>
-                  <span className="empty-hint">分析生成中或当时未产出报告；稍后刷新可查看。</span>
+                  <span className="empty-hint">
+                    {String(detail?.note || '分析生成中或当时未产出报告；稍后刷新可查看。')}
+                  </span>
                 </div>
               )}
             </section>
@@ -318,6 +345,21 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
               >
                 查看该测点趋势图
               </Link>
+              <Link
+                href="/process"
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"
+              >
+                查看工艺流程
+              </Link>
+              {report && (
+                <button
+                  type="button"
+                  onClick={() => navigator.clipboard?.writeText(`${sensorTag} ${direction}\n\n${report}`)}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"
+                >
+                  复制报告
+                </button>
+              )}
               {agentChatUrl && (
                 <a
                   href={agentChatUrl}

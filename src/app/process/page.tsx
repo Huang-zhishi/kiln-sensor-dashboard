@@ -16,7 +16,24 @@ export default function ProcessPage() {
   const [systems, setSystems] = useState<ProcessSystem[]>([]);
   const [active, setActive] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [anomalyCounts, setAnomalyCounts] = useState<Record<string, number>>({});
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // 各窑体 24h 异常数（用于系统标签徐标，工艺与异常联动）
+  useEffect(() => {
+    fetch('/api/anomalies?hours=24&limit=200')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.success) return;
+        const counts: Record<string, number> = {};
+        for (const it of j.items || []) {
+          const k = String(it.kiln_id || '');
+          if (k) counts[k] = (counts[k] || 0) + 1;
+        }
+        setAnomalyCounts(counts);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     fetch('/api/process/systems')
@@ -97,7 +114,7 @@ export default function ProcessPage() {
             <div key={sys.id} className="relative group">
               <button
                 onClick={() => setActive(sys.id)}
-                className="px-4 py-1.5 text-xs rounded transition-all"
+                className="px-4 py-1.5 text-xs rounded transition-all flex items-center gap-1.5"
                 style={{
                   background: active === sys.id ? 'rgba(0, 212, 255, 0.2)' : 'rgba(255,255,255,0.05)',
                   color: active === sys.id ? '#00d4ff' : '#94a3b8',
@@ -107,6 +124,19 @@ export default function ProcessPage() {
                 }}
               >
                 {sys.name}
+                {(() => {
+                  const m = (sys.name || '').match(/^(\d+#)/);
+                  const cnt = m ? anomalyCounts[m[1]] || 0 : 0;
+                  return cnt > 0 ? (
+                    <span
+                      className="px-1 rounded-full text-[9px] font-normal"
+                      style={{ background: '#ef4444', color: '#fff' }}
+                      title={`近 24h 异常 ${cnt} 条`}
+                    >
+                      {cnt}
+                    </span>
+                  ) : null;
+                })()}
               </button>
               {/* Edit button */}
               <Link

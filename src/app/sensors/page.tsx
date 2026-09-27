@@ -34,6 +34,7 @@ export default function SensorsPage() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [hideOffline, setHideOffline] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [referenceMap, setReferenceMap] = useState<Record<string, { mn: number; mx: number; av: number }>>({});
 
   // SSE 实时订阅：最新数据每 2s 推送，历史随服务端缓存（15s）自动刷新
   useEffect(() => {
@@ -66,6 +67,20 @@ export default function SensorsPage() {
     };
     return () => es.close();
   }, [timeRange]);
+
+  // 历史参考区间（全量统计，服务端缓存 10 分钟）
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/sensors/reference')
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.success) setReferenceMap(j.references || {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 计算每种类型的传感器数量（只统计在线的，离线的单独显示）
   const onlineData = useMemo(() => latestData.filter((d) => d.is_online !== false), [latestData]);
@@ -242,6 +257,7 @@ export default function SensorsPage() {
                         isOnline={online}
                         lastReport={online ? undefined : new Date(sensor.reported_at).toLocaleString('zh-CN')}
                         suspect={isSuspectReading(Number(sensor.sensor_value))}
+                        reference={referenceMap[sensor.sensor_tag]}
                       />
                     </LazyLoad>
                   );
