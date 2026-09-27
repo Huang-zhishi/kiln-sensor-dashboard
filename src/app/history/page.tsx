@@ -63,6 +63,16 @@ function fmtAxis(iso: string): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// 点击输入框任意位置即弹出原生日期/时间选择器（默认只有点右侧图标才会弹）
+function openPicker(e: React.MouseEvent<HTMLInputElement>) {
+  const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+  try {
+    el.showPicker?.();
+  } catch {
+    // 部分浏览器不支持 showPicker 或非用户手势时抛错，忽略即可（退回原生行为）
+  }
+}
+
 export default function HistoryPage() {
   const [sensors, setSensors] = useState<SensorOption[]>([]);
   const [loadingSensors, setLoadingSensors] = useState(true);
@@ -346,8 +356,9 @@ export default function HistoryPage() {
                     type="date"
                     value={day}
                     max={todayStr()}
+                    onClick={openPicker}
                     onChange={(e) => setDay(e.target.value)}
-                    className="flex-1 bg-card border border-border-strong rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary"
+                    className="flex-1 bg-card border border-border-strong rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary cursor-pointer"
                   />
                   <button
                     onClick={() => setDay(todayStr())}
@@ -371,15 +382,17 @@ export default function HistoryPage() {
                   <input
                     type="datetime-local"
                     value={rangeStart}
+                    onClick={openPicker}
                     onChange={(e) => setRangeStart(e.target.value)}
-                    className="flex-1 bg-card border border-border-strong rounded px-2 py-2 text-xs text-foreground focus:outline-none focus:border-primary"
+                    className="flex-1 bg-card border border-border-strong rounded px-2 py-2 text-xs text-foreground focus:outline-none focus:border-primary cursor-pointer"
                   />
                   <span className="text-muted-foreground text-xs">至</span>
                   <input
                     type="datetime-local"
                     value={rangeEnd}
+                    onClick={openPicker}
                     onChange={(e) => setRangeEnd(e.target.value)}
-                    className="flex-1 bg-card border border-border-strong rounded px-2 py-2 text-xs text-foreground focus:outline-none focus:border-primary"
+                    className="flex-1 bg-card border border-border-strong rounded px-2 py-2 text-xs text-foreground focus:outline-none focus:border-primary cursor-pointer"
                   />
                 </div>
               )}
