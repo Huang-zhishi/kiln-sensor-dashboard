@@ -7,15 +7,40 @@ interface HeaderProps {
   onRefresh: () => void;
   loading: boolean;
   connected?: boolean;
+  /** 最新一次数据上报时间（用于展示数据延迟） */
+  latestReportedAt?: string | null;
 }
 
-// 顶部标题栏：信号迹线（视觉签名）+ 连接状态 + 手动刷新
-export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = true }: HeaderProps) {
+// 顶部标题栏：信号迹线（视觉签名）+ 连接/数据新鲜度 + 手动刷新
+export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = true, latestReportedAt = null }: HeaderProps) {
   const [timeStr, setTimeStr] = useState('');
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setTimeStr(lastUpdate.toLocaleTimeString('zh-CN', { hour12: false }));
   }, [lastUpdate]);
+
+  // 每秒刷新一次延迟显示
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  let delaySec: number | null = null;
+  if (latestReportedAt) {
+    const t = new Date(latestReportedAt).getTime();
+    if (isFinite(t)) delaySec = Math.max(0, Math.round((nowMs - t) / 1000));
+  }
+  const delayText =
+    delaySec === null ? '--' : delaySec < 60 ? `${delaySec}s` : `${Math.floor(delaySec / 60)}m${delaySec % 60}s`;
+  const delayColor =
+    delaySec === null
+      ? 'var(--muted-foreground)'
+      : delaySec < 30
+        ? 'var(--success)'
+        : delaySec < 120
+          ? 'var(--warning)'
+          : 'var(--danger)';
 
   return (
     <header className="border-b border-border">
@@ -37,8 +62,14 @@ export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = tr
           </h1>
         </div>
 
-        {/* 右侧：最后更新 + 刷新 */}
+        {/* 右侧：数据延迟 + 最后更新 + 刷新 */}
         <div className="flex items-center gap-5 flex-shrink-0">
+          <div className="text-right">
+            <div className="text-[11px] text-muted-foreground uppercase tracking-wider">数据延迟</div>
+            <div className="text-sm font-mono tabular-nums" style={{ color: delayColor }} title="最新上报距当前的时间">
+              {delayText}
+            </div>
+          </div>
           <div className="text-right">
             <div className="text-[11px] text-muted-foreground uppercase tracking-wider">最后更新</div>
             <div className="text-sm font-mono text-foreground tabular-nums">{timeStr || '--:--:--'}</div>

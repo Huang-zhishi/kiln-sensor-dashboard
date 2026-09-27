@@ -59,6 +59,17 @@ export function getSensorLevel(tag: string, value: number): SensorLevel {
   return 'normal';
 }
 
+// 已知「未接入/故障」哨兵值（与 Agent 侧 sensor_reference_tool 判定一致）：
+// 单点即可判定为疑似坏点的常量值。
+const SENTINEL_VALUES = new Set([-1000, 1372, 870, -5000, -750, -7.5]);
+
+/** 轻量坏点判定：值命中已知哨兵值或非有限数时视为疑似坏点。 */
+export function isSuspectReading(value: number): boolean {
+  const n = Number(value);
+  if (!isFinite(n)) return true;
+  return SENTINEL_VALUES.has(n);
+}
+
 // 传感器类型 -> 显示单位
 export const UNIT_MAP: Record<SensorType, string> = {
   '温度': '°C',

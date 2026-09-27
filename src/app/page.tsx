@@ -84,6 +84,8 @@ export default function DashboardPage() {
   const [unreadKeys, setUnreadKeys] = useState<Set<string>>(new Set());
   const [soundOn, setSoundOn] = useState(true);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [anomaliesError, setAnomaliesError] = useState(false);
+  const [agentChatUrl, setAgentChatUrl] = useState('');
 
   // 已出现过的 event_key / 上次筛选指纹（避免切换筛选时误报“新异常”）
   const knownKeysRef = useRef<Set<string>>(new Set());
@@ -99,6 +101,14 @@ export default function DashboardPage() {
     soundOnRef.current = soundOn;
     if (typeof window !== 'undefined') window.localStorage.setItem('anomaly_sound', soundOn ? 'on' : 'off');
   }, [soundOn]);
+
+  // 运行时前端配置（Agent 对话入口 URL）
+  useEffect(() => {
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((j) => setAgentChatUrl(j.agentChatUrl || ''))
+      .catch(() => {});
+  }, []);
 
   const candidates = stats?.sensorTags.map((t) => t.sensor_tag) || [];
   const effectiveTrendTags = useMemo(() => {
@@ -168,8 +178,10 @@ export default function DashboardPage() {
       firstLoadRef.current = false;
 
       setAnomalies(items);
+      setAnomaliesError(false);
     } catch {
-      // 保留上一次结果
+      // 保留上一次结果，但标记错误供页面提示
+      setAnomaliesError(true);
     } finally {
       setAnomaliesLoading(false);
     }
@@ -182,6 +194,16 @@ export default function DashboardPage() {
   }, [loadAnomalies, reloadNonce]);
 
   const handleRefresh = useMemo(() => () => setConnNonce((n) => n + 1), []);
+
+  // 数据新鲜度：最新一次上报时间（页头据此显示延迟）
+  const latestReportedAt = useMemo(() => {
+    let max = 0;
+    for (const d of latestData) {
+      const t = new Date(d.reported_at).getTime();
+      if (isFinite(t) && t > max) max = t;
+    }
+    return max ? new Date(max).toISOString() : null;
+  }, [latestData]);
 
   const handleSelectAnomaly = useCallback((item: AnomalyItem) => {
     setSelectedAnomaly(item);
@@ -199,7 +221,13 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <DashboardHeader lastUpdate={lastUpdate} onRefresh={handleRefresh} loading={loading} connected={connected} />
+      <DashboardHeader
+        lastUpdate={lastUpdate}
+        onRefresh={handleRefresh}
+        loading={loading}
+        connected={connected}
+        latestReportedAt={latestReportedAt}
+      />
 
       {loading && latestData.length === 0 ? (
         <DashboardSkeleton />
@@ -212,6 +240,19 @@ export default function DashboardPage() {
           />
 
           <StatCards data={latestData} stats={stats} anomalyCount={anomalies.length} />
+
+          {(!connected || anomaliesError) && (
+            <div
+              className="panel px-4 py-2 text-xs flex items-center gap-2"
+              style={{ borderColor: 'color-mix(in srgb, var(--warning) 45%, transparent)' }}
+            >
+              <span className="status-dot warning" style={{ width: 8, height: 8 }} />
+              <span style={{ color: 'var(--warning)' }}>
+                {!connected ? '实时连接已断开，正在自动重连…' : '异常记录接口暂时不可用，正在重试…'}
+              </span>
+              <span className="text-muted-foreground">页面展示为最近一次成功获取的数据。</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-12 gap-3 lg:h-[clamp(460px,60vh,760px)] lg:grid-rows-[minmax(0,1fr)]">
             {/* 左：窑体概览 + 数据中断 */}
@@ -234,6 +275,7 @@ export default function DashboardPage() {
                 selectedTags={effectiveTrendTags}
                 onSelectedTagsChange={setSelectedTrendTags}
                 candidateTags={candidates}
+                anomalies={anomalies}
               />
             </div>
 
@@ -261,6 +303,7 @@ export default function DashboardPage() {
         summary={selectedAnomaly}
         onClose={() => setSelectedAnomaly(null)}
         onStatusChange={handleStatusChange}
+        agentChatUrl={agentChatUrl}
       />
     </div>
   );

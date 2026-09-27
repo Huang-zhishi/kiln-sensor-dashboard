@@ -204,7 +204,11 @@ export function AnomalyList({
                     </div>
                     <div className="text-[10px] text-muted-foreground truncate mt-0.5">
                       {a.kiln_id || '--'} · {fmtTime(a.ts)}
-                      {Number(a.has_report) === 1 && <span className="ml-1.5 text-primary">· 有 Agent 分析</span>}
+                      {Number(a.has_report) === 1 ? (
+                        <span className="ml-1.5 text-primary">· 有分析</span>
+                      ) : (
+                        <span className="ml-1.5 text-muted-foreground">· 无分析</span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">

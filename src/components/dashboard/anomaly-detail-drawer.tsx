@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import type { EChartsOption } from 'echarts';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { EChart } from '@/components/charts/echarts';
 import { AnomalyMarkdown } from './anomaly-markdown';
 import { classifySensor, UNIT_MAP } from '@/lib/sensor-classifier';
 import type { AnomalyItem } from './anomaly-list';
@@ -12,6 +14,7 @@ interface AnomalyDetailDrawerProps {
   summary?: AnomalyItem | null;
   onClose: () => void;
   onStatusChange?: (eventKey: string, status: 'acked' | 'new') => void;
+  agentChatUrl?: string;
 }
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -31,22 +34,32 @@ function fmtTime(iso: unknown): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange }: AnomalyDetailDrawerProps) {
+function fmtHHmm(ts: unknown): string {
+  const d = new Date(String(ts));
+  if (!isFinite(d.getTime())) return '--';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange, agentChatUrl }: AnomalyDetailDrawerProps) {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'acked' | 'new'>('new');
   const [saving, setSaving] = useState(false);
+  const [trendPoints, setTrendPoints] = useState<Array<{ ts: string; sensor_value: number }>>([]);
 
   useEffect(() => {
     if (!eventKey) {
       setDetail(null);
       setError(null);
+      setTrendPoints([]);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setTrendPoints([]);
     fetch(`/api/anomalies/${encodeURIComponent(eventKey)}`)
       .then((r) => r.json())
       .then((j) => {
@@ -68,6 +81,26 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
       cancelled = true;
     };
   }, [eventKey]);
+
+  const item = (detail || summary) as Record<string, unknown> | null | undefined;
+  const sensorTag = String(item?.sensor_tag || '');
+  const eventTs = String(item?.ts || '');
+
+  // 触发前后趋势（事件时刻 ±30 分钟）
+  useEffect(() => {
+    if (!sensorTag || !eventTs) return;
+    let cancelled = false;
+    const q = new URLSearchParams({ sensor_tag: sensorTag, center: eventTs, minutes: '30' });
+    fetch(`/api/sensors/window?${q}`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (!cancelled && j.success) setTrendPoints(Array.isArray(j.points) ? j.points : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sensorTag, eventTs]);
 
   const toggleAck = async () => {
     if (!eventKey || saving) return;
@@ -91,12 +124,76 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
     }
   };
 
-  const item = (detail || summary) as Record<string, unknown> | null | undefined;
   const direction = String(item?.direction || '');
   const isHigh = direction === 'NEW_HIGH';
   const accent = isHigh ? 'var(--danger)' : 'var(--info)';
-  const unit = item?.sensor_tag ? UNIT_MAP[classifySensor(String(item.sensor_tag))] : '';
+  const unit = sensorTag ? UNIT_MAP[classifySensor(sensorTag)] : '';
   const report = String(detail?.report || '');
+
+  const trendOption = useMemo<EChartsOption>(() => {
+    const labels = trendPoints.map((p) => fmtHHmm(p.ts));
+    const values = trendPoints.map((p) => Number(p.sensor_value));
+    // 触发点对齐到最近的时间桶
+    let markIdx = -1;
+    if (eventTs && trendPoints.length) {
+      const target = new Date(eventTs).getTime();
+      let best = Infinity;
+      trendPoints.forEach((p, i) => {
+        const diff = Math.abs(new Date(p.ts).getTime() - target);
+        if (diff < best) {
+          best = diff;
+          markIdx = i;
+        }
+      });
+    }
+    return {
+      animation: false,
+      backgroundColor: 'transparent',
+      grid: { top: 8, right: 12, bottom: 20, left: 46 },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#14181f',
+        borderColor: 'rgba(155,170,192,0.24)',
+        borderRadius: 3,
+        textStyle: { fontSize: 11, color: '#e8edf4' },
+        valueFormatter: (v: unknown) => (isFinite(Number(v)) ? `${Number(v).toFixed(2)} ${unit}` : '--'),
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLine: { lineStyle: { color: 'rgba(155,170,192,0.2)' } },
+        axisLabel: { color: '#8b96a6', fontSize: 9, hideOverlap: true },
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: 'rgba(155,170,192,0.1)', type: 'dashed' } },
+        axisLabel: { color: '#8b96a6', fontSize: 9 },
+      },
+      series: [
+        {
+          type: 'line',
+          data: values,
+          showSymbol: false,
+          lineStyle: { width: 1.5 },
+          color: accent,
+          connectNulls: true,
+          markLine:
+            markIdx >= 0
+              ? {
+                  symbol: 'none',
+                  silent: true,
+                  lineStyle: { color: accent, type: 'dashed', width: 1 },
+                  label: { formatter: '触发', color: accent, fontSize: 9 },
+                  data: [{ xAxis: markIdx }],
+                }
+              : undefined,
+        },
+      ],
+    };
+  }, [trendPoints, eventTs, accent, unit]);
 
   return (
     <Sheet open={!!eventKey} onOpenChange={(o) => !o && onClose()}>
@@ -104,7 +201,7 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
         <SheetHeader className="px-5 py-4 border-b border-border">
           <SheetTitle className="flex items-center gap-2 text-sm">
             <span className="w-2 h-2 rounded-full" style={{ background: accent }} />
-            <span className="truncate">{String(item?.sensor_tag || '异常详情')}</span>
+            <span className="truncate">{sensorTag || '异常详情'}</span>
             <span
               className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
               style={{ color: accent, background: `color-mix(in srgb, ${accent} 16%, transparent)` }}
@@ -162,6 +259,23 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
               </div>
             </section>
 
+            {/* 触发前后趋势 */}
+            <section>
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                触发前后趋势（±30 分钟）
+              </div>
+              {trendPoints.length > 0 ? (
+                <div
+                  className="rounded"
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}
+                >
+                  <EChart option={trendOption} style={{ height: 150, width: '100%' }} />
+                </div>
+              ) : (
+                <div className="text-[11px] text-muted-foreground px-1 py-3">暂无该时段历史数据</div>
+              )}
+            </section>
+
             {/* Agent 分析 */}
             <section>
               <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -184,7 +298,7 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
             </section>
 
             {/* 操作 */}
-            <section className="pt-1 flex items-center gap-2">
+            <section className="pt-1 flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={toggleAck}
@@ -204,6 +318,16 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
               >
                 查看该测点趋势图
               </Link>
+              {agentChatUrl && (
+                <a
+                  href={agentChatUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"
+                >
+                  问 Agent
+                </a>
+              )}
             </section>
           </div>
         )}

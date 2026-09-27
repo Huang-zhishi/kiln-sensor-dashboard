@@ -25,6 +25,8 @@ interface TrendChartProps {
   onSelectedTagsChange?: (tags: string[]) => void;
   /** 全部可用传感器标签（来自 stats；数据按选中裁剪后仍可搜索/选择其它传感器） */
   candidateTags?: string[];
+  /** 异常事件（突破极值）用于在曲线上打点 */
+  anomalies?: Array<{ ts: string; sensor_tag: string; direction: string; sensor_value: number }>;
 }
 
 // 系列调色板（与语义色对齐，首位为信息蓝）
@@ -96,6 +98,7 @@ export function TrendChart({
   selectedTags: controlledTags,
   onSelectedTagsChange,
   candidateTags,
+  anomalies,
 }: TrendChartProps) {
   const [internalTimeRange, setInternalTimeRange] = useState<string>('1h');
   const timeRange = externalTimeRange ?? internalTimeRange;
@@ -248,6 +251,39 @@ export function TrendChart({
       };
     });
 
+    // 异常点打标：把异常时间对齐到最近的曲线时间桶，叠加散点（红=突破最高，蓝=突破最低）
+    const anomalyPoints = (anomalies || [])
+      .filter((a) => displayTags.includes(a.sensor_tag))
+      .map((a) => {
+        const label = formatFn(a.ts);
+        const idx = chartData.findIndex((row) => row.time === label);
+        if (idx < 0) return null;
+        const color = a.direction === 'NEW_HIGH' ? '#ff4d5e' : '#4da3ff';
+        return {
+          value: [idx, Number(a.sensor_value)],
+          name: a.sensor_tag,
+          direction: a.direction,
+          itemStyle: { color },
+        };
+      })
+      .filter(Boolean) as Array<{
+      value: [number, number];
+      name: string;
+      direction: string;
+      itemStyle: { color: string };
+    }>;
+    const anomalySeries = anomalyPoints.length
+      ? [
+          {
+            name: '异常点',
+            type: 'scatter' as const,
+            data: anomalyPoints,
+            symbolSize: 9,
+            z: 20,
+          },
+        ]
+      : [];
+
     return {
       animation: false,
       backgroundColor: 'transparent',
@@ -304,9 +340,9 @@ export function TrendChart({
         },
         scale: true,
       },
-      series,
+      series: [...series, ...anomalySeries],
     };
-  }, [chartData, displayTags, allTags]);
+  }, [chartData, displayTags, allTags, anomalies, formatFn]);
 
   return (
     <div className="panel h-full flex flex-col">

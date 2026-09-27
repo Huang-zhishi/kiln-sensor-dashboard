@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { CategoryNav } from '@/components/sensors/category-nav';
 import { SensorChart } from '@/components/sensors/sensor-chart';
 import { LazyLoad } from '@/components/sensors/lazy-load';
-import { classifySensor, UNIT_MAP, type SensorType } from '@/lib/sensor-classifier';
+import { classifySensor, UNIT_MAP, isSuspectReading, type SensorType } from '@/lib/sensor-classifier';
 
 interface SensorReading {
   device_id: string;
@@ -33,6 +33,7 @@ export default function SensorsPage() {
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [hideOffline, setHideOffline] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // SSE 实时订阅：最新数据每 2s 推送，历史随服务端缓存（15s）自动刷新
   useEffect(() => {
@@ -87,7 +88,9 @@ export default function SensorsPage() {
       ? latestData
       : latestData.filter((item) => classifySensor(item.sensor_tag) === activeType);
     const visible = hideOffline ? byType.filter((d) => d.is_online !== false) : byType;
-    return [...visible].sort((a, b) => {
+    const q = searchQuery.trim().toLowerCase();
+    const searched = q ? visible.filter((d) => d.sensor_tag.toLowerCase().includes(q)) : visible;
+    return [...searched].sort((a, b) => {
       const oa = a.is_online === false ? 1 : 0;
       const ob = b.is_online === false ? 1 : 0;
       if (oa !== ob) return oa - ob;
@@ -96,7 +99,7 @@ export default function SensorsPage() {
         a.sensor_tag.localeCompare(b.sensor_tag)
       );
     });
-  }, [latestData, activeType, hideOffline]);
+  }, [latestData, activeType, hideOffline, searchQuery]);
 
   const timeRangeOptions = [
     { value: '10m', label: '10分钟' },
@@ -155,6 +158,14 @@ export default function SensorsPage() {
                 <span className={`status-dot ${connected ? 'online' : 'offline'}`} style={{ width: 7, height: 7 }} />
                 {connected ? '实时' : '重连中'}
               </span>
+
+              {/* 搜索 */}
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜索测点…"
+                className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground w-40 focus:outline-none focus:border-primary"
+              />
 
               {/* 只看在线 */}
               <button
@@ -230,6 +241,7 @@ export default function SensorsPage() {
                         unit={UNIT_MAP[sensorType]}
                         isOnline={online}
                         lastReport={online ? undefined : new Date(sensor.reported_at).toLocaleString('zh-CN')}
+                        suspect={isSuspectReading(Number(sensor.sensor_value))}
                       />
                     </LazyLoad>
                   );

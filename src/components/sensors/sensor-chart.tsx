@@ -19,6 +19,8 @@ interface SensorChartProps {
   lastReport?: string;
   /** 设备标识：同一 sensor_tag 可能对应多台设备，用于区分卡片 */
   deviceId?: string;
+  /** 疑似坏点（最新值命中已知哨兵值） */
+  suspect?: boolean;
 }
 
 // 设备 ID 通常为长随机串，缩略展示（完整值放 title）
@@ -26,7 +28,7 @@ function shortDeviceId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
 
-export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId }: SensorChartProps) {
+export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId, suspect = false }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
   // 开关量（0/1）：轴与数值显示「关/开」而非数字
   const isSwitch = type === '开关';
@@ -151,6 +153,11 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
                 title={deviceId}
               >
                 {shortDeviceId(deviceId)}
+              </div>
+            )}
+            {suspect && isOnline && (
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--warning)' }} title="最新值命中已知坏点哨兵值">
+                疑似坏点
               </div>
             )}
           </div>
