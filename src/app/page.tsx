@@ -6,8 +6,8 @@ import { FilterBar } from '@/components/dashboard/filter-bar';
 import { StatCards } from '@/components/dashboard/stat-cards';
 import { TrendChart } from '@/components/dashboard/trend-chart';
 import { KilnOverview } from '@/components/dashboard/kiln-overview';
-import { DataTable } from '@/components/dashboard/data-table';
-import { AlarmList } from '@/components/dashboard/alarm-list';
+import { AnomalyList, type AnomalyItem } from '@/components/dashboard/anomaly-list';
+import { AnomalyDetailDrawer } from '@/components/dashboard/anomaly-detail-drawer';
 import { DashboardSkeleton } from '@/components/dashboard/panel-skeleton';
 
 interface SensorData {
@@ -41,6 +41,8 @@ const DEFAULT_TREND_TAGS = [
   '1#窑体温度TI_206E',
 ];
 
+const ANOMALY_REFRESH_MS = 30000;
+
 export default function DashboardPage() {
   const [latestData, setLatestData] = useState<SensorData[]>([]);
   const [historyData, setHistoryData] = useState<SensorData[]>([]);
@@ -53,6 +55,11 @@ export default function DashboardPage() {
   const [timeRange, setTimeRange] = useState('1h');
   // 趋势图选中的传感器（受控状态，联动 API 精确查询）
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>(DEFAULT_TREND_TAGS);
+
+  // 异常记录（突破历史极值，来自 TDengine anomaly_events，由 Agent 写入）
+  const [anomalies, setAnomalies] = useState<AnomalyItem[]>([]);
+  const [anomaliesLoading, setAnomaliesLoading] = useState(true);
+  const [selectedAnomaly, setSelectedAnomaly] = useState<AnomalyItem | null>(null);
 
   // 实际生效的选中标签：默认标签在新库不存在时自动回退到前 4 个实际传感器
   const candidates = stats?.sensorTags.map((t) => t.sensor_tag) || [];
@@ -101,6 +108,28 @@ export default function DashboardPage() {
     return () => es.close();
   }, [filters, timeRange, trendTagsKey, connNonce]);
 
+  // 异常记录拉取（30s 轮询；数据量小，无需 SSE）
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await fetch('/api/anomalies?hours=168&limit=100');
+        const j = await r.json();
+        if (!cancelled) setAnomalies(Array.isArray(j.items) ? (j.items as AnomalyItem[]) : []);
+      } catch {
+        // 忽略：保留上一次结果
+      } finally {
+        if (!cancelled) setAnomaliesLoading(false);
+      }
+    };
+    load();
+    const timer = setInterval(load, ANOMALY_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [connNonce]);
+
   const handleRefresh = useMemo(() => () => setConnNonce((n) => n + 1), []);
 
   return (
@@ -111,45 +140,53 @@ export default function DashboardPage() {
         <DashboardSkeleton />
       ) : (
         <div className="px-4 pb-6 space-y-3">
-        <FilterBar
-          filters={filters}
-          onFilterChange={setFilters}
-          kilns={stats?.kilns.map((k) => k.kiln_id) || []}
-        />
+          <FilterBar
+            filters={filters}
+            onFilterChange={setFilters}
+            kilns={stats?.kilns.map((k) => k.kiln_id) || []}
+          />
 
-        <StatCards data={latestData} stats={stats} />
+          <StatCards data={latestData} stats={stats} anomalyCount={anomalies.length} />
 
-        {/* 三段式布局：左窑体概览 / 中趋势图(黄金区) / 右告警列表
-            行高随视口自适应（44vh，360~600px 限幅），面板内部滚动 */}
-        <div className="grid grid-cols-12 gap-3 lg:h-[clamp(360px,44vh,600px)] lg:grid-rows-[minmax(0,1fr)]">
-          {/* Left: Kiln Overview */}
-          <div className="col-span-12 h-[320px] min-h-0 lg:col-span-3 lg:h-auto">
-            <KilnOverview data={latestData} stats={stats} />
+          {/* 三段式布局：左窑体概览 / 中趋势图(黄金区) / 右异常记录
+              移除底部实时数据表后，行高增大以利用空间；面板内部滚动 */}
+          <div className="grid grid-cols-12 gap-3 lg:h-[clamp(460px,60vh,760px)] lg:grid-rows-[minmax(0,1fr)]">
+            {/* Left: Kiln Overview */}
+            <div className="col-span-12 h-[260px] min-h-0 lg:col-span-3 lg:h-auto">
+              <KilnOverview data={latestData} stats={stats} />
+            </div>
+
+            {/* Center: Trend Chart (golden area) */}
+            <div className="col-span-12 h-[440px] min-h-0 lg:col-span-6 lg:h-auto">
+              <TrendChart
+                data={historyData}
+                timeRange={timeRange}
+                onTimeRangeChange={setTimeRange}
+                defaultTags={DEFAULT_TREND_TAGS}
+                selectedTags={effectiveTrendTags}
+                onSelectedTagsChange={setSelectedTrendTags}
+                candidateTags={candidates}
+              />
+            </div>
+
+            {/* Right: Anomaly records */}
+            <div className="col-span-12 h-[420px] min-h-0 lg:col-span-3 lg:h-auto">
+              <AnomalyList
+                items={anomalies}
+                loading={anomaliesLoading}
+                selectedKey={selectedAnomaly?.event_key || null}
+                onSelect={setSelectedAnomaly}
+              />
+            </div>
           </div>
-
-          {/* Center: Trend Chart (golden area) */}
-          <div className="col-span-12 h-[420px] min-h-0 lg:col-span-6 lg:h-auto">
-            <TrendChart
-              data={historyData}
-              timeRange={timeRange}
-              onTimeRangeChange={setTimeRange}
-              defaultTags={DEFAULT_TREND_TAGS}
-              selectedTags={effectiveTrendTags}
-              onSelectedTagsChange={setSelectedTrendTags}
-              candidateTags={candidates}
-            />
-          </div>
-
-          {/* Right: Alarms */}
-          <div className="col-span-12 h-[360px] min-h-0 lg:col-span-3 lg:h-auto">
-            <AlarmList data={latestData} />
-          </div>
-        </div>
-
-        {/* Bottom: Real-time data table */}
-        <DataTable data={latestData} />
         </div>
       )}
+
+      <AnomalyDetailDrawer
+        eventKey={selectedAnomaly?.event_key || null}
+        summary={selectedAnomaly}
+        onClose={() => setSelectedAnomaly(null)}
+      />
     </div>
   );
 }

@@ -26,6 +26,7 @@ interface StatsData {
 interface StatCardsProps {
   data: SensorData[];
   stats: StatsData | null;
+  anomalyCount?: number;
 }
 
 // 数字平滑补间：值变化时 rAF 缓动过渡，营造大屏数字"跳动"质感
@@ -57,7 +58,8 @@ function AnimatedNumber({ value, format }: { value: number; format?: (n: number)
 }
 
 // 统计卡：大数字即论点。左侧语义色条承载状态，主数据等宽 tabular。
-export function StatCards({ data, stats }: StatCardsProps) {
+export function StatCards({ data, stats, anomalyCount = 0 }: StatCardsProps) {
+  void stats; // 统计总量不再首页展示（保留入参兼容）
   const onlineData = data.filter((d) => d.is_online !== false);
   const totalOnlineSensors = new Set(onlineData.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
   const totalAllSensors = new Set(data.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
@@ -65,65 +67,45 @@ export function StatCards({ data, stats }: StatCardsProps) {
   const totalDevices = new Set(data.map((d) => d.device_id)).size;
   const onlineKilns = new Set(onlineData.map((d) => d.kiln_id)).size;
   const totalKilns = new Set(data.map((d) => d.kiln_id)).size;
-  const totalRecords = stats?.totalRecords || 0;
   const hasOffline = totalAllSensors > totalOnlineSensors;
 
-  // 平均温度：只统计在线温度类传感器（温度 / temp 两类命名）
-  const tempSensors = onlineData.filter(
-    (d) =>
-      d.sensor_tag.toLowerCase().includes('temp') ||
-      d.sensor_tag.toLowerCase().includes('温度')
-  );
-  const avgTempValue = tempSensors.length > 0
-    ? tempSensors.reduce((sum, d) => sum + d.sensor_value, 0) / tempSensors.length
-    : null;
-
-  // tone：hero(烬金) / success(在线健康) / warning(存在离线) / neutral
+  // tone：danger(异常) / success(在线健康) / warning(存在离线) / neutral
   const cards = [
     {
-      label: '数据总量',
-      tone: 'neutral' as const,
-      value: <AnimatedNumber value={totalRecords} />,
+      label: '异常记录',
+      tone: anomalyCount > 0 ? ('danger' as const) : ('success' as const),
+      value: <AnimatedNumber value={anomalyCount} />,
       unit: '条',
     },
     {
       label: '在线窑体',
-      tone: hasOffline ? 'warning' as const : 'success' as const,
+      tone: hasOffline ? ('warning' as const) : ('success' as const),
       value: <AnimatedNumber value={onlineKilns} />,
       unit: `/ ${totalKilns} 座`,
     },
     {
       label: '在线设备',
-      tone: hasOffline ? 'warning' as const : 'success' as const,
+      tone: hasOffline ? ('warning' as const) : ('success' as const),
       value: <AnimatedNumber value={onlineDevices} />,
       unit: `/ ${totalDevices} 台`,
     },
     {
       label: '在线传感器',
-      tone: hasOffline ? 'warning' as const : 'success' as const,
+      tone: hasOffline ? ('warning' as const) : ('success' as const),
       value: <AnimatedNumber value={totalOnlineSensors} />,
       unit: `/ ${totalAllSensors} 个`,
-    },
-    {
-      label: '平均温度',
-      tone: 'hero' as const,
-      value:
-        avgTempValue === null
-          ? '--'
-          : <AnimatedNumber value={avgTempValue} format={(n) => n.toFixed(1)} />,
-      unit: '°C',
     },
   ];
 
   const toneBar: Record<string, string> = {
-    hero: 'var(--primary)',
+    danger: 'var(--danger)',
     success: 'var(--success)',
     warning: 'var(--warning)',
     neutral: 'var(--border-strong)',
   };
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {cards.map((card, i) => (
         <div
           key={card.label}
@@ -134,7 +116,7 @@ export function StatCards({ data, stats }: StatCardsProps) {
           <div className="flex items-baseline gap-1.5">
             <span
               className="text-[26px] font-bold font-mono leading-none tabular-nums number-transition"
-              style={{ color: card.tone === 'hero' ? 'var(--primary)' : 'var(--foreground)' }}
+              style={{ color: card.tone === 'danger' ? 'var(--danger)' : 'var(--foreground)' }}
             >
               {card.value}
             </span>
