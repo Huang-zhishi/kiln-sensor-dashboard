@@ -11,6 +11,7 @@ interface AnomalyDetailDrawerProps {
   eventKey: string | null;
   summary?: AnomalyItem | null;
   onClose: () => void;
+  onStatusChange?: (eventKey: string, status: 'acked' | 'new') => void;
 }
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -30,10 +31,12 @@ function fmtTime(iso: unknown): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetailDrawerProps) {
+export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange }: AnomalyDetailDrawerProps) {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<'acked' | 'new'>('new');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!eventKey) {
@@ -48,8 +51,12 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetai
       .then((r) => r.json())
       .then((j) => {
         if (cancelled) return;
-        if (j.success) setDetail(j.item as Record<string, unknown>);
-        else setError(j.error || '加载失败');
+        if (j.success) {
+          setDetail(j.item as Record<string, unknown>);
+          setStatus(j.item?.status === 'acked' ? 'acked' : 'new');
+        } else {
+          setError(j.error || '加载失败');
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(String(e));
@@ -61,6 +68,28 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetai
       cancelled = true;
     };
   }, [eventKey]);
+
+  const toggleAck = async () => {
+    if (!eventKey || saving) return;
+    const next: 'acked' | 'new' = status === 'acked' ? 'new' : 'acked';
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/anomalies/${encodeURIComponent(eventKey)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next, device_id: String((detail || summary)?.device_id || '') }),
+      });
+      const j = await r.json();
+      if (j.success) {
+        setStatus(next);
+        onStatusChange?.(eventKey, next);
+      }
+    } catch {
+      // 失败保持原状
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const item = (detail || summary) as Record<string, unknown> | null | undefined;
   const direction = String(item?.direction || '');
@@ -82,6 +111,11 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetai
             >
               {DIRECTION_LABEL[direction] || direction || '异常'}
             </span>
+            {status === 'acked' && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded border border-border text-muted-foreground flex-shrink-0">
+                已处理
+              </span>
+            )}
           </SheetTitle>
         </SheetHeader>
 
@@ -121,7 +155,9 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetai
                 </div>
                 <div>
                   <div className="text-muted-foreground text-[10px]">设备 / 窑体</div>
-                  <div className="truncate">{String(item?.device_id || '--')} · {String(item?.kiln_id || '--')}</div>
+                  <div className="truncate">
+                    {String(item?.device_id || '--')} · {String(item?.kiln_id || '--')}
+                  </div>
                 </div>
               </div>
             </section>
@@ -148,7 +184,20 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose }: AnomalyDetai
             </section>
 
             {/* 操作 */}
-            <section className="pt-1">
+            <section className="pt-1 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={toggleAck}
+                disabled={saving}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-60"
+                style={
+                  status === 'acked'
+                    ? { border: '1px solid var(--border-strong)', background: 'var(--card)' }
+                    : { border: '1px solid var(--success)', background: 'color-mix(in srgb, var(--success) 12%, transparent)', color: 'var(--success)' }
+                }
+              >
+                {saving ? '处理中…' : status === 'acked' ? '取消已处理' : '标记已处理'}
+              </button>
               <Link
                 href="/sensors"
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"

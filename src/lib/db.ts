@@ -226,6 +226,26 @@ export async function query(sql: string): Promise<TDengineResult> {
 const inflight = new Map<string, Promise<unknown>>();
 
 /**
+ * 执行不返回结果集的语句（INSERT / CREATE 等）。
+ * query() 假设有结果集，会对 null meta 处理报错，故写操作走此函数。
+ */
+export async function execute(sql: string): Promise<void> {
+  if (pool.length === 0 && poolInitFailed) {
+    poolInitFailed = false;
+  }
+  const entry = await acquire();
+  try {
+    const wsRows = await withTimeout(entry.conn.query(sql), QUERY_TIMEOUT_MS);
+    wsRows.close().catch(() => {});
+  } catch (err) {
+    evict(entry);
+    throw err;
+  } finally {
+    if (pool.includes(entry)) release(entry);
+  }
+}
+
+/**
  * 带缓存的查询函数（含缓存击穿去重）
  * @param key 缓存键（含查询参数，避免不同筛选串数据）
  * @param sql 查询语句
