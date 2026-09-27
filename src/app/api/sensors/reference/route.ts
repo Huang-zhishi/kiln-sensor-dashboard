@@ -19,7 +19,11 @@ export async function GET() {
     for (const r of rows) {
       const tag = String(r.sensor_tag ?? '');
       if (!tag) continue;
-      references[tag] = { mn: Number(r.mn), mx: Number(r.mx), av: Number(r.av) };
+      // 跳过无数据测点（MIN/MAX/AVG 可能为 null/NaN），避免前端 toFixed 崩溃
+      if (typeof r.mn !== 'number' || !Number.isFinite(r.mn)) continue;
+      if (typeof r.mx !== 'number' || !Number.isFinite(r.mx)) continue;
+      if (typeof r.av !== 'number' || !Number.isFinite(r.av)) continue;
+      references[tag] = { mn: r.mn, mx: r.mx, av: r.av };
     }
     return NextResponse.json({ success: true, count: Object.keys(references).length, references });
   } catch (err) {

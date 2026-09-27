@@ -276,9 +276,11 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                 <div className="col-span-2">
                   <div className="text-muted-foreground text-[10px]">当前历史参考（全量统计）</div>
                   <div className="font-mono tabular-nums">
-                    {reference
+                    {reference && Number.isFinite(reference.mn) && Number.isFinite(reference.mx)
                       ? `${reference.mn.toFixed(2)} ~ ${reference.mx.toFixed(2)} ${unit}（均值 ${reference.av.toFixed(2)}）`
-                      : '加载中…'}
+                      : reference
+                        ? '该测点暂无历史数据'
+                        : '加载中…'}
                   </div>
                 </div>
               </div>

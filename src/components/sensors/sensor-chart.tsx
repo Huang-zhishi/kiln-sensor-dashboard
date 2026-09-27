@@ -175,11 +175,11 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
               </div>
             ) : (
               <div className="text-lg font-bold font-mono" style={{ color }}>
-                {latestValue.toFixed(1)}
+                {Number.isFinite(latestValue) ? latestValue.toFixed(1) : '--'}
               </div>
             )}
             <div className="text-xs text-muted-foreground">{unit}</div>
-            {reference && isFinite(reference.mn) && isFinite(reference.mx) && (
+            {reference && Number.isFinite(reference.mn) && Number.isFinite(reference.mx) && (
               <div className="text-[9px] text-muted-foreground" title="历史参考区间（全量统计）">
                 参考 {reference.mn.toFixed(1)}~{reference.mx.toFixed(1)}
               </div>
