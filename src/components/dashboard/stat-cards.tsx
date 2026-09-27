@@ -10,6 +10,7 @@ interface SensorData {
   reported_at: string;
   is_online?: boolean;
   value_missing?: boolean;
+  maintenance?: boolean;
 }
 
 interface StatsData {
@@ -64,7 +65,7 @@ export function StatCards({ data, stats, anomalyCount = 0 }: StatCardsProps) {
   const onlineData = data.filter((d) => d.is_online !== false);
   const totalOnlineSensors = new Set(onlineData.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
   const totalAllSensors = new Set(data.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
-  const missingCount = data.filter((d) => d.is_online !== false && d.value_missing === true).length;
+  const missingCount = data.filter((d) => d.is_online !== false && d.value_missing === true && d.maintenance !== true).length;
   const onlineDevices = new Set(onlineData.map((d) => d.device_id)).size;
   const totalDevices = new Set(data.map((d) => d.device_id)).size;
   const onlineKilns = new Set(onlineData.map((d) => d.kiln_id)).size;

@@ -67,8 +67,10 @@ export interface MetaPatch {
 export class MetaValidationError extends Error {}
 
 export function upsertMeta(patch: MetaPatch): SensorMeta {
-  const tag = String(patch.sensor_tag ?? '').trim();
-  if (!tag) throw new MetaValidationError('sensor_tag 不能为空');
+  // 注意：保留 sensor_tag 原样（部分测点名带前导空格），仅用 trim 做非空校验，
+  // 否则元数据键会与真实 sensor_tag 对不上。
+  const tag = String(patch.sensor_tag ?? '');
+  if (!tag.trim()) throw new MetaValidationError('sensor_tag 不能为空');
   if (tag.length > 128) throw new MetaValidationError('sensor_tag 过长（>128）');
 
   const map = loadMetaMap();

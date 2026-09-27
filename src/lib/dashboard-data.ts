@@ -4,6 +4,7 @@
 import { queryWithCache, CACHE_TTL } from '@/lib/db';
 import { extractKilnId, isSensorOnline } from '@/lib/sensor-classifier';
 import { resolveTimeWindow } from '@/lib/time-range';
+import { loadMetaMap } from '@/lib/sensor-meta';
 
 export interface DashboardParams {
   kiln_id: string;
@@ -195,15 +196,19 @@ export async function fetchDashboardData(p: DashboardParams) {
   ]);
 
   const now = Date.now();
+  const metaMap = loadMetaMap();
   const mapReading = (r: Record<string, unknown>) => {
     const val = numOrNull(r.sensor_value);
+    const tag = String(r.sensor_tag || '');
     return {
       device_id: r.device_id,
-      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      kiln_id: extractKilnId(tag),
       sensor_tag: r.sensor_tag,
       sensor_value: val ?? 0,
       // 源值为 NULL（网关上报 null）→ 标记值缺失，与真实 0 区分
       value_missing: val === null,
+      // 检修中的测点：值缺失属预期，不计入数据质量问题
+      maintenance: metaMap[tag]?.maintenance === true,
       reported_at: r.ts,
       // 在线判定：LAST(ts) 距 now 超过 60s 视为数据中断（离线）
       is_online: isSensorOnline(r.ts as string | undefined, now),
@@ -273,14 +278,17 @@ export async function fetchSensorsData(time_range: string, start?: string, end?:
   ]);
 
   const nowS = Date.now();
+  const metaMap = loadMetaMap();
   const latest = latestRows.map((r) => {
     const val = numOrNull(r.sensor_value);
+    const tag = String(r.sensor_tag || '');
     return {
       device_id: r.device_id,
-      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      kiln_id: extractKilnId(tag),
       sensor_tag: r.sensor_tag,
       sensor_value: val ?? 0,
       value_missing: val === null,
+      maintenance: metaMap[tag]?.maintenance === true,
       reported_at: r.ts,
       is_online: isSensorOnline(r.ts as string | undefined, nowS),
     };

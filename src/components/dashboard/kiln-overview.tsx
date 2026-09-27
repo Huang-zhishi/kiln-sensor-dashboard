@@ -10,6 +10,7 @@ interface SensorData {
   reported_at: string;
   is_online?: boolean;
   value_missing?: boolean;
+  maintenance?: boolean;
 }
 
 interface KilnOverviewProps {
@@ -40,7 +41,7 @@ function buildKilnInfos(data: SensorData[]): KilnInfo[] {
     }
     devices.get(d.kiln_id)!.add(d.device_id);
     sensors.get(d.kiln_id)!.add(d.sensor_tag);
-    if (d.is_online !== false && d.value_missing !== true) online.get(d.kiln_id)!.add(d.sensor_tag);
+    if (d.is_online !== false && (d.value_missing !== true || d.maintenance === true)) online.get(d.kiln_id)!.add(d.sensor_tag);
   });
 
   return Array.from(kilns.values()).map((k) => ({

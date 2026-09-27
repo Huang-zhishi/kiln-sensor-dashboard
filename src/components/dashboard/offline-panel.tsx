@@ -11,6 +11,8 @@ interface SensorData {
   is_online?: boolean;
   /** 源值为 NULL（网关上报 null）而非真实 0 */
   value_missing?: boolean;
+  /** 检修中的测点（值缺失/中断属预期，不计入质量问题） */
+  maintenance?: boolean;
 }
 
 function fmtLastSeen(iso: string): string {
@@ -56,13 +58,14 @@ function QualityRow({ d, tone, label, pulse }: RowProps) {
 // 数据质量面板：数据中断（离线）+ 值缺失（源报文为 null，时间戳仍在走）
 export function OfflinePanel({ data }: { data: SensorData[] }) {
   const offline = useMemo(
-    () => data.filter((d) => d.is_online === false).sort((a, b) => new Date(a.reported_at).getTime() - new Date(b.reported_at).getTime()),
+    () => data.filter((d) => d.is_online === false && d.maintenance !== true).sort((a, b) => new Date(a.reported_at).getTime() - new Date(b.reported_at).getTime()),
     [data],
   );
   const missing = useMemo(
-    () => data.filter((d) => d.is_online !== false && d.value_missing === true).sort((a, b) => a.sensor_tag.localeCompare(b.sensor_tag)),
+    () => data.filter((d) => d.is_online !== false && d.value_missing === true && d.maintenance !== true).sort((a, b) => a.sensor_tag.localeCompare(b.sensor_tag)),
     [data],
   );
+  const maintCount = useMemo(() => data.filter((d) => d.maintenance === true).length, [data]);
   const total = offline.length + missing.length;
 
   return (
@@ -71,6 +74,7 @@ export function OfflinePanel({ data }: { data: SensorData[] }) {
         数据质量
         <span className="ml-auto text-xs text-muted-foreground font-normal normal-case">
           中断 {offline.length} · 值缺失 {missing.length}
+          {maintCount > 0 && <span className="ml-1">· 检修忽略 {maintCount}</span>}
         </span>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
