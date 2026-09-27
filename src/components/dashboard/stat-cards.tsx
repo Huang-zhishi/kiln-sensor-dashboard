@@ -9,6 +9,7 @@ interface SensorData {
   sensor_value: number;
   reported_at: string;
   is_online?: boolean;
+  value_missing?: boolean;
 }
 
 interface StatsData {
@@ -63,6 +64,7 @@ export function StatCards({ data, stats, anomalyCount = 0 }: StatCardsProps) {
   const onlineData = data.filter((d) => d.is_online !== false);
   const totalOnlineSensors = new Set(onlineData.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
   const totalAllSensors = new Set(data.map((d) => `${d.device_id}-${d.sensor_tag}`)).size;
+  const missingCount = data.filter((d) => d.is_online !== false && d.value_missing === true).length;
   const onlineDevices = new Set(onlineData.map((d) => d.device_id)).size;
   const totalDevices = new Set(data.map((d) => d.device_id)).size;
   const onlineKilns = new Set(onlineData.map((d) => d.kiln_id)).size;
@@ -76,6 +78,12 @@ export function StatCards({ data, stats, anomalyCount = 0 }: StatCardsProps) {
       tone: anomalyCount > 0 ? ('danger' as const) : ('success' as const),
       value: <AnimatedNumber value={anomalyCount} />,
       unit: '条',
+    },
+    {
+      label: '值缺失',
+      tone: missingCount > 0 ? ('warning' as const) : ('success' as const),
+      value: <AnimatedNumber value={missingCount} />,
+      unit: '个',
     },
     {
       label: '在线窑体',
@@ -105,7 +113,7 @@ export function StatCards({ data, stats, anomalyCount = 0 }: StatCardsProps) {
   };
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
       {cards.map((card, i) => (
         <div
           key={card.label}

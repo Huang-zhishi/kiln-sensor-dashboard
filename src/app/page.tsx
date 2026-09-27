@@ -18,6 +18,7 @@ interface SensorData {
   sensor_tag: string;
   sensor_value: number;
   reported_at: string;
+  value_missing?: boolean;
 }
 
 interface StatsData {

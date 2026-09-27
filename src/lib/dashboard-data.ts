@@ -161,6 +161,13 @@ async function fetchStatsRows(kiln_id: string): Promise<Record<string, unknown>[
   );
 }
 
+// 安全转数值：null/undefined/''/NaN → null（用于区分“值缺失”与真实的 0）
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 // 大屏聚合数据：最新读数 + 统计 + 历史趋势
 export async function fetchDashboardData(p: DashboardParams) {
   const { kiln_id, time_range, sensors, start, end } = p;
@@ -188,15 +195,20 @@ export async function fetchDashboardData(p: DashboardParams) {
   ]);
 
   const now = Date.now();
-  const mapReading = (r: Record<string, unknown>) => ({
-    device_id: r.device_id,
-    kiln_id: extractKilnId(String(r.sensor_tag || '')),
-    sensor_tag: r.sensor_tag,
-    sensor_value: Number(r.sensor_value) || 0,
-    reported_at: r.ts,
-    // 在线判定：LAST(ts) 距 now 超过 60s 视为数据中断（离线）
-    is_online: isSensorOnline(r.ts as string | undefined, now),
-  });
+  const mapReading = (r: Record<string, unknown>) => {
+    const val = numOrNull(r.sensor_value);
+    return {
+      device_id: r.device_id,
+      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      sensor_tag: r.sensor_tag,
+      sensor_value: val ?? 0,
+      // 源值为 NULL（网关上报 null）→ 标记值缺失，与真实 0 区分
+      value_missing: val === null,
+      reported_at: r.ts,
+      // 在线判定：LAST(ts) 距 now 超过 60s 视为数据中断（离线）
+      is_online: isSensorOnline(r.ts as string | undefined, now),
+    };
+  };
 
   const latestData = latestRows.map(mapReading);
 
@@ -211,13 +223,18 @@ export async function fetchDashboardData(p: DashboardParams) {
     .map((d) => ({ device_id: d }));
   const totalRecords = statsRows.reduce((sum, r) => sum + Number(r.total || 0), 0);
 
-  const historyData = historyRows.map((r) => ({
-    device_id: r.device_id,
-    kiln_id: extractKilnId(String(r.sensor_tag || '')),
-    sensor_tag: r.sensor_tag,
-    sensor_value: Number(r.sensor_value) || 0,
-    reported_at: r.ts,
-  }));
+  // 历史趋势：跳过源值为 NULL 的时间桶，避免把“无数据”画成 0 的平线
+  const historyData = historyRows.flatMap((r) => {
+    const val = numOrNull(r.sensor_value);
+    if (val === null) return [];
+    return [{
+      device_id: r.device_id,
+      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      sensor_tag: r.sensor_tag,
+      sensor_value: val,
+      reported_at: r.ts,
+    }];
+  });
 
   return {
     latest: latestData,
@@ -255,23 +272,33 @@ export async function fetchSensorsData(time_range: string, start?: string, end?:
     ),
   ]);
 
-  const latest = latestRows.map((r) => ({
-    device_id: r.device_id,
-    kiln_id: extractKilnId(String(r.sensor_tag || '')),
-    sensor_tag: r.sensor_tag,
-    sensor_value: Number(r.sensor_value) || 0,
-    reported_at: r.ts,
-    is_online: isSensorOnline(r.ts as string | undefined, Date.now()),
-  }));
+  const nowS = Date.now();
+  const latest = latestRows.map((r) => {
+    const val = numOrNull(r.sensor_value);
+    return {
+      device_id: r.device_id,
+      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      sensor_tag: r.sensor_tag,
+      sensor_value: val ?? 0,
+      value_missing: val === null,
+      reported_at: r.ts,
+      is_online: isSensorOnline(r.ts as string | undefined, nowS),
+    };
+  });
 
-  const history = historyRows.map((r) => ({
-    device_id: r.device_id,
-    kiln_id: extractKilnId(String(r.sensor_tag || '')),
-    sensor_tag: r.sensor_tag,
-    sensor_value: Number(r.sensor_value) || 0,
-    reported_at: r.ts,
-    is_online: isSensorOnline(r.ts as string | undefined, Date.now()),
-  }));
+  // 历史趋势：跳过 NULL 时间桶
+  const history = historyRows.flatMap((r) => {
+    const val = numOrNull(r.sensor_value);
+    if (val === null) return [];
+    return [{
+      device_id: r.device_id,
+      kiln_id: extractKilnId(String(r.sensor_tag || '')),
+      sensor_tag: r.sensor_tag,
+      sensor_value: val,
+      reported_at: r.ts,
+      is_online: isSensorOnline(r.ts as string | undefined, nowS),
+    }];
+  });
 
   return { latest, history };
 }

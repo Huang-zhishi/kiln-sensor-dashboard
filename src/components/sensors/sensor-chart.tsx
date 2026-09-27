@@ -21,6 +21,8 @@ interface SensorChartProps {
   deviceId?: string;
   /** 疑似坏点（最新值命中已知哨兵值） */
   suspect?: boolean;
+  /** 源值为 NULL（网关上报 null）→ 显示“无数据” */
+  valueMissing?: boolean;
   /** 历史参考区间（全量统计） */
   reference?: { mn: number; mx: number; av: number };
 }
@@ -30,7 +32,7 @@ function shortDeviceId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id;
 }
 
-export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId, suspect = false, reference }: SensorChartProps) {
+export function SensorChart({ name, type, data, unit, isOnline = true, lastReport, deviceId, suspect = false, valueMissing = false, reference }: SensorChartProps) {
   const color = SENSOR_TYPE_COLORS[type] || '#33a2e5';
   // 开关量（0/1）：轴与数值显示「关/开」而非数字
   const isSwitch = type === '开关';
@@ -162,11 +164,18 @@ export function SensorChart({ name, type, data, unit, isOnline = true, lastRepor
                 疑似坏点
               </div>
             )}
+            {valueMissing && isOnline && (
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--warning)' }} title="网关上报的值为 null（非真实 0）">
+                值缺失
+              </div>
+            )}
           </div>
         </div>
         {isOnline ? (
           <div className="text-right">
-            {isSwitch ? (
+            {valueMissing ? (
+              <div className="text-sm font-medium" style={{ color: 'var(--warning)' }}>无数据</div>
+            ) : isSwitch ? (
               <div
                 className="text-lg font-bold"
                 style={{ color: latestValue >= 0.5 ? '#38c172' : 'var(--muted-foreground)' }}

@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
         device_id: String(r.device_id || ''),
         kiln_id: extractKilnId(sensorTag),
         type: sensorType,
-        value: Number(r.sensor_value),
+        value: r.sensor_value === null || r.sensor_value === undefined ? null : Number(r.sensor_value),
         unit: UNIT_MAP[sensorType] || '',
         reported_at: r.ts,
       };

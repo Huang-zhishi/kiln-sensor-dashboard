@@ -21,6 +21,7 @@ interface SensorReading {
   sensor_value: number;
   reported_at: string;
   is_online?: boolean;
+  value_missing?: boolean;
 }
 
 interface SensorHistory {
@@ -351,6 +352,7 @@ export default function SensorsPage() {
                         data={historyData[`${sensor.device_id}|${sensor.sensor_tag}`] || []}
                         unit={unit}
                         isOnline={online}
+                        valueMissing={sensor.value_missing === true}
                         lastReport={online ? undefined : new Date(sensor.reported_at).toLocaleString('zh-CN')}
                         suspect={meta?.suspect || isSuspectReading(Number(sensor.sensor_value))}
                         reference={rangeRef}
