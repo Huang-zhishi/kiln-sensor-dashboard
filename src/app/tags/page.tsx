@@ -306,6 +306,17 @@ export default function TagsPage() {
                         <td className="px-2 py-1.5">
                           <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5" style={{ background: SENSOR_TYPE_COLORS[option.type as SensorType] || '#8b96a6' }} />
                           <span title={`${option.sensor_tag} · ${option.device_id}`}>{option.sensor_tag}</span>
+                          {noData && (
+                            <span className="ml-1 px-1 rounded text-[10px]" style={{ background: 'color-mix(in srgb, var(--warning) 18%, transparent)', color: 'var(--warning)' }}>
+                              无数据
+                            </span>
+                          )}
+                          {meta.maintenance && (
+                            <span className="ml-1 px-1 rounded text-[10px]" style={{ background: 'color-mix(in srgb, var(--warning) 12%, transparent)', color: 'var(--muted-foreground)' }}>检修</span>
+                          )}
+                          {meta.suspect && (
+                            <span className="ml-1 px-1 rounded text-[10px]" style={{ background: 'color-mix(in srgb, var(--danger) 15%, transparent)', color: 'var(--danger)' }}>坏点</span>
+                          )}
                           {configured && <span className="ml-1" style={{ color: 'var(--info)' }} title="已配置">•</span>}
                         </td>
                         <td className="px-2 py-1.5 text-muted-foreground">{option.type}</td>

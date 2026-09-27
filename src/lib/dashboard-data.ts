@@ -5,6 +5,7 @@ import { queryWithCache, CACHE_TTL } from '@/lib/db';
 import { extractKilnId, isSensorOnline } from '@/lib/sensor-classifier';
 import { resolveTimeWindow } from '@/lib/time-range';
 import { loadMetaMap } from '@/lib/sensor-meta';
+import { fetchQualityMap } from '@/lib/sensor-quality';
 
 export interface DashboardParams {
   kiln_id: string;
@@ -173,7 +174,7 @@ function numOrNull(v: unknown): number | null {
 export async function fetchDashboardData(p: DashboardParams) {
   const { kiln_id, time_range, sensors, start, end } = p;
 
-  const [latestRows, statsRows, historyRows] = await Promise.all([
+  const [latestRows, statsRows, historyRows, quality] = await Promise.all([
     // 1. 最新数据（缓存 5s；key 含筛选参数避免串数据）
     queryWithCache<Record<string, unknown>[]>(`latest:${p.kiln_id || ''}:${p.sensors === null ? '' : 'f'}`, `
       SELECT LAST(ts) as ts, LAST(sensor_value) as sensor_value,
@@ -193,6 +194,9 @@ export async function fetchDashboardData(p: DashboardParams) {
       buildHistoryQuery(time_range, kiln_id, '', sensors, start, end),
       CACHE_TTL.history,
     ),
+
+    // 4. 数据质量（无数据起始时间；缓存 2 分钟，失败不影响主数据）
+    fetchQualityMap().catch(() => ({}) as Record<string, { no_data_since: string | null }>),
   ]);
 
   const now = Date.now();
@@ -209,13 +213,16 @@ export async function fetchDashboardData(p: DashboardParams) {
       value_missing: val === null,
       // 检修中的测点：值缺失属预期，不计入数据质量问题
       maintenance: metaMap[tag]?.maintenance === true,
+      // 无数据起始时间（值缺失时用于展示，避免显示“当前时间”）
+      no_data_since: quality[tag]?.no_data_since ?? null,
       reported_at: r.ts,
       // 在线判定：LAST(ts) 距 now 超过 60s 视为数据中断（离线）
       is_online: isSensorOnline(r.ts as string | undefined, now),
     };
   };
 
-  const latestData = latestRows.map(mapReading);
+  // 过滤空测点名（脏数据），不进入大屏统计
+  const latestData = latestRows.map(mapReading).filter((d) => String(d.sensor_tag || '').trim());
 
   const kilns = Array.from(new Set(statsRows.map((r) => extractKilnId(String(r.sensor_tag || '')))))
     .filter(Boolean)
@@ -262,7 +269,7 @@ export async function fetchDashboardData(p: DashboardParams) {
 
 // 传感器页聚合数据：全部最新读数 + 全部传感器历史
 export async function fetchSensorsData(time_range: string, start?: string, end?: string) {
-  const [latestRows, historyRows] = await Promise.all([
+  const [latestRows, historyRows, quality] = await Promise.all([
     queryWithCache<Record<string, unknown>[]>('sensors-latest:all', `
       SELECT LAST(ts) as ts, LAST(sensor_value) as sensor_value,
              device_id, sensor_tag
@@ -275,24 +282,29 @@ export async function fetchSensorsData(time_range: string, start?: string, end?:
       buildAllSensorsHistoryQuery(time_range, start, end),
       CACHE_TTL.history,
     ),
+
+    fetchQualityMap().catch(() => ({}) as Record<string, { no_data_since: string | null }>),
   ]);
 
   const nowS = Date.now();
   const metaMap = loadMetaMap();
-  const latest = latestRows.map((r) => {
-    const val = numOrNull(r.sensor_value);
-    const tag = String(r.sensor_tag || '');
-    return {
-      device_id: r.device_id,
-      kiln_id: extractKilnId(tag),
-      sensor_tag: r.sensor_tag,
-      sensor_value: val ?? 0,
-      value_missing: val === null,
-      maintenance: metaMap[tag]?.maintenance === true,
-      reported_at: r.ts,
-      is_online: isSensorOnline(r.ts as string | undefined, nowS),
-    };
-  });
+  const latest = latestRows
+    .map((r) => {
+      const val = numOrNull(r.sensor_value);
+      const tag = String(r.sensor_tag || '');
+      return {
+        device_id: r.device_id,
+        kiln_id: extractKilnId(tag),
+        sensor_tag: r.sensor_tag,
+        sensor_value: val ?? 0,
+        value_missing: val === null,
+        maintenance: metaMap[tag]?.maintenance === true,
+        no_data_since: quality[tag]?.no_data_since ?? null,
+        reported_at: r.ts,
+        is_online: isSensorOnline(r.ts as string | undefined, nowS),
+      };
+    })
+    .filter((d) => String(d.sensor_tag || '').trim());
 
   // 历史趋势：跳过 NULL 时间桶
   const history = historyRows.flatMap((r) => {

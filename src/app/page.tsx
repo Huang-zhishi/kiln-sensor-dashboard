@@ -19,6 +19,7 @@ interface SensorData {
   sensor_value: number;
   reported_at: string;
   value_missing?: boolean;
+  no_data_since?: string | null;
   maintenance?: boolean;
 }
 

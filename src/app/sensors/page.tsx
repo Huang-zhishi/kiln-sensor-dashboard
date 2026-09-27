@@ -22,6 +22,8 @@ interface SensorReading {
   reported_at: string;
   is_online?: boolean;
   value_missing?: boolean;
+  no_data_since?: string | null;
+  maintenance?: boolean;
 }
 
 interface SensorHistory {
