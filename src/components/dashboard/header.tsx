@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 
 interface HeaderProps {
   lastUpdate: Date;
@@ -74,6 +75,12 @@ export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = tr
             <div className="text-[11px] text-muted-foreground uppercase tracking-wider">最后更新</div>
             <div className="text-sm font-mono text-foreground tabular-nums">{timeStr || '--:--:--'}</div>
           </div>
+          <Link
+            href="/history"
+            className="px-3 py-1.5 rounded text-sm font-medium bg-card border border-border-strong text-foreground hover:bg-card-hover transition-colors"
+          >
+            历史查询
+          </Link>
           <button
             onClick={onRefresh}
             disabled={loading}

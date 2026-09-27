@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryWithCache, CACHE_TTL } from '@/lib/db';
 import { extractKilnId } from '@/lib/sensor-classifier';
+import { resolveTimeWindow } from '@/lib/time-range';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,40 +9,20 @@ function escapeSql(s: string): string {
   return s.replace(/'/g, "''").replace(/\\/g, '\\\\');
 }
 
-// Map time range to TDengine INTERVAL and hours
-function getIntervalConfig(timeRange: string): { hours: number; interval: string } {
-  switch (timeRange) {
-    case '10m':  return { hours: 0, interval: '10s' };
-    case '30m':  return { hours: 0, interval: '10s' };
-    case '1h':   return { hours: 1, interval: '1m' };
-    case '6h':   return { hours: 6, interval: '1m' };
-    case '12h':  return { hours: 12, interval: '1h' };
-    case '24h':  return { hours: 24, interval: '1h' };
-    default:     return { hours: 12, interval: '1h' };
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const kilnId = searchParams.get('kiln_id');
     const sensorTag = searchParams.get('sensor_tag');
+    // time_range 预设（10m/30m/1h/6h/12h/24h/3d/7d/15d/30d）
+    // 或自定义区间 start/end（epoch 毫秒或 ISO 时间串）
     const timeRange = searchParams.get('time_range') || '12h';
+    const start = searchParams.get('start');
+    const end = searchParams.get('end');
 
-    const { hours, interval } = getIntervalConfig(timeRange);
+    const win = resolveTimeWindow({ timeRange, start, end });
 
-    const conditions: string[] = [];
-
-    // Build time condition
-    if (hours > 0) {
-      conditions.push(`ts > NOW() - ${hours}h`);
-    } else {
-      // For sub-hour ranges, use minutes/seconds
-      if (timeRange === '10m') conditions.push(`ts > NOW() - 10m`);
-      else if (timeRange === '30m') conditions.push(`ts > NOW() - 30m`);
-      else conditions.push(`ts > NOW() - 12h`);
-    }
-
+    const conditions: string[] = [win.tsCondition];
     if (kilnId) {
       conditions.push(`sensor_tag LIKE '${escapeSql(kilnId)}%'`);
     }
@@ -57,12 +38,12 @@ export async function GET(request: NextRequest) {
       FROM sensor_readings
       ${whereClause}
       PARTITION BY sensor_tag, device_id
-      INTERVAL(${interval})
+      INTERVAL(${win.interval})
       ORDER BY ts ASC
     `;
 
     const rows = await queryWithCache<Record<string, unknown>[]>(
-      `history:${timeRange}:${kilnId ?? ''}:${sensorTag ?? ''}`,
+      `history:${win.tsCondition}:${win.interval}:${kilnId ?? ''}:${sensorTag ?? ''}`,
       sql,
       CACHE_TTL.history,
     );
@@ -75,7 +56,16 @@ export async function GET(request: NextRequest) {
       reported_at: r.ts,
     }));
 
-    return NextResponse.json({ success: true, data, count: data.length });
+    return NextResponse.json({
+      success: true,
+      time_range: timeRange,
+      interval: win.interval,
+      custom: win.isCustom,
+      start: win.startMs,
+      end: win.endMs,
+      data,
+      count: data.length,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('History API error:', message);

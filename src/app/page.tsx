@@ -10,6 +10,7 @@ import { OfflinePanel } from '@/components/dashboard/offline-panel';
 import { AnomalyList, type AnomalyItem, type AnomalyFilters } from '@/components/dashboard/anomaly-list';
 import { AnomalyDetailDrawer } from '@/components/dashboard/anomaly-detail-drawer';
 import { DashboardSkeleton } from '@/components/dashboard/panel-skeleton';
+import { CUSTOM_RANGE_VALUE } from '@/lib/time-range';
 
 interface SensorData {
   device_id: string;
@@ -74,6 +75,7 @@ export default function DashboardPage() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [filters, setFilters] = useState({ kiln_id: '' });
   const [timeRange, setTimeRange] = useState('1h');
+  const [customRange, setCustomRange] = useState<{ start: number; end: number } | null>(null);
   const [selectedTrendTags, setSelectedTrendTags] = useState<string[]>(DEFAULT_TREND_TAGS);
 
   // 异常记录
@@ -122,9 +124,19 @@ export default function DashboardPage() {
   const [connNonce, setConnNonce] = useState(0);
   const [connected, setConnected] = useState(false);
 
+  const handleTimeRangeChange = useCallback((range: string) => {
+    setTimeRange(range);
+    // 切回预设时清除自定义区间，避免残留参数继续生效
+    if (range !== CUSTOM_RANGE_VALUE) setCustomRange(null);
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams();
     params.set('time_range', timeRange);
+    if (customRange) {
+      params.set('start', String(customRange.start));
+      params.set('end', String(customRange.end));
+    }
     if (filters.kiln_id) params.set('kiln_id', filters.kiln_id);
     params.set('sensors', trendTagsKey);
 
@@ -145,7 +157,7 @@ export default function DashboardPage() {
     };
     es.onerror = () => setConnected(false);
     return () => es.close();
-  }, [filters, timeRange, trendTagsKey, connNonce]);
+  }, [filters, timeRange, customRange, trendTagsKey, connNonce]);
 
   // 异常记录拉取（30s 轮询 + 筛选变化即时刷新）
   const loadAnomalies = useCallback(async () => {
@@ -270,7 +282,9 @@ export default function DashboardPage() {
               <TrendChart
                 data={historyData}
                 timeRange={timeRange}
-                onTimeRangeChange={setTimeRange}
+                onTimeRangeChange={handleTimeRangeChange}
+                customRange={customRange}
+                onCustomRangeChange={setCustomRange}
                 defaultTags={DEFAULT_TREND_TAGS}
                 selectedTags={effectiveTrendTags}
                 onSelectedTagsChange={setSelectedTrendTags}

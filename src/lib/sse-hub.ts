@@ -82,10 +82,16 @@ class SseHub {
         let body: string;
         try {
           const payload = group.params.type === 'sensors'
-            ? await fetchSensorsData(group.params.time_range || '1h')
+            ? await fetchSensorsData(
+                group.params.time_range || '1h',
+                group.params.start,
+                group.params.end,
+              )
             : await fetchDashboardData({
                 kiln_id: group.params.kiln_id || '',
                 time_range: group.params.time_range || '12h',
+                start: group.params.start,
+                end: group.params.end,
                 sensors: 'sensors' in group.params
                   ? group.params.sensors.split(',').map((s) => s.trim()).filter(Boolean)
                   : null,

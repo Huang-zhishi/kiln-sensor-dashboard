@@ -4,6 +4,14 @@ import { useMemo, useState } from 'react';
 import type { EChartsOption } from 'echarts';
 import { EChart } from '@/components/charts/echarts';
 import { classifySensor, SENSOR_TYPES, SENSOR_TYPE_COLORS, type SensorType } from '@/lib/sensor-classifier';
+import {
+  TIME_RANGE_PRESETS,
+  CUSTOM_RANGE_VALUE,
+  intervalForRange,
+  intervalLabel,
+  localInputToMs,
+  msToLocalInput,
+} from '@/lib/time-range';
 
 interface SensorData {
   device_id: string;
@@ -23,6 +31,9 @@ interface TrendChartProps {
   /** 受控选中的传感器标签 */
   selectedTags?: string[];
   onSelectedTagsChange?: (tags: string[]) => void;
+  /** 自定义区间（epoch 毫秒）；timeRange 为 'custom' 时生效 */
+  customRange?: { start: number; end: number } | null;
+  onCustomRangeChange?: (range: { start: number; end: number } | null) => void;
   /** 全部可用传感器标签（来自 stats；数据按选中裁剪后仍可搜索/选择其它传感器） */
   candidateTags?: string[];
   /** 异常事件（突破极值）用于在曲线上打点 */
@@ -37,42 +48,40 @@ const COLORS = [
 ];
 
 // Get interval info from time range
-function getIntervalInfo(timeRange: string): { interval: string; label: string; formatFn: (iso: string) => string } {
+function getIntervalInfo(
+  timeRange: string,
+  spanMs?: number,
+): { interval: string; label: string; formatFn: (iso: string) => string } {
   const pad = (n: number) => String(n).padStart(2, '0');
+  const interval = intervalForRange(timeRange, spanMs);
+  const label = intervalLabel(interval);
 
-  switch (timeRange) {
-    case '10m':
-    case '30m':
-      return {
-        interval: '10s',
-        label: '10秒采样',
-        formatFn: (iso: string) => {
-          const d = parseDate(iso);
-          return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-        },
-      };
-    case '1h':
-    case '6h':
-      return {
-        interval: '1m',
-        label: '1分钟采样',
-        formatFn: (iso: string) => {
-          const d = parseDate(iso);
-          return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        },
-      };
-    case '12h':
-    case '24h':
-    default:
-      return {
-        interval: '1h',
-        label: '1小时采样',
-        formatFn: (iso: string) => {
-          const d = parseDate(iso);
-          return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:00`;
-        },
-      };
+  let formatFn: (iso: string) => string;
+  if (interval === '10s') {
+    formatFn = (iso) => {
+      const d = parseDate(iso);
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+  } else if (interval === '1m') {
+    formatFn = (iso) => {
+      const d = parseDate(iso);
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+  } else if (interval.endsWith('m')) {
+    // 5m / 15m / 30m：分钟粒度，超过一天时带上日期
+    formatFn = (iso) => {
+      const d = parseDate(iso);
+      return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+  } else {
+    // 1h / 3h 等小时及以上粒度
+    formatFn = (iso) => {
+      const d = parseDate(iso);
+      return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:00`;
+    };
   }
+
+  return { interval, label, formatFn };
 }
 
 function parseDate(iso: string): Date {
@@ -97,6 +106,8 @@ export function TrendChart({
   defaultTags,
   selectedTags: controlledTags,
   onSelectedTagsChange,
+  customRange,
+  onCustomRangeChange,
   candidateTags,
   anomalies,
 }: TrendChartProps) {
@@ -108,16 +119,34 @@ export function TrendChart({
     onTimeRangeChange?.(range);
   };
 
-  const { formatFn } = useMemo(() => getIntervalInfo(timeRange), [timeRange]);
+  // 自定义区间：默认折叠，点击「自定义」展开日期时间选择
+  const [showCustom, setShowCustom] = useState(false);
+  const [customStartInput, setCustomStartInput] = useState('');
+  const [customEndInput, setCustomEndInput] = useState('');
+  const customSpanMs = customRange ? customRange.end - customRange.start : undefined;
 
-  const TIME_RANGES = [
-    { value: '10m', label: '10 分钟' },
-    { value: '30m', label: '30 分钟' },
-    { value: '1h', label: '1 小时' },
-    { value: '6h', label: '6 小时' },
-    { value: '12h', label: '12 小时' },
-    { value: '24h', label: '24 小时' },
-  ];
+  const openCustom = () => {
+    if (!showCustom) {
+      const end = customRange?.end ?? Date.now();
+      const start = customRange?.start ?? end - 7 * 24 * 3600_000;
+      setCustomStartInput(msToLocalInput(start));
+      setCustomEndInput(msToLocalInput(end));
+    }
+    setShowCustom((v) => !v);
+  };
+
+  const applyCustom = () => {
+    const s = localInputToMs(customStartInput);
+    const e = localInputToMs(customEndInput);
+    if (s === null || e === null) return;
+    handleTimeRangeChange(CUSTOM_RANGE_VALUE);
+    onCustomRangeChange?.({ start: Math.min(s, e), end: Math.max(s, e) });
+  };
+
+  const { interval, formatFn } = useMemo(
+    () => getIntervalInfo(timeRange, customSpanMs),
+    [timeRange, customSpanMs],
+  );
 
   // 根据类型过滤数据
   const filteredData = useMemo(() => {
@@ -355,22 +384,62 @@ export function TrendChart({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          {TIME_RANGES.map((tr) => (
+        <div className="flex flex-wrap items-center justify-end gap-1">
+          {TIME_RANGE_PRESETS.map((tr) => (
             <button
               key={tr.value}
-              onClick={() => handleTimeRangeChange(tr.value)}
-              className={`px-2 py-0.5 text-xs rounded transition-colors ${
+              onClick={() => {
+                setShowCustom(false);
+                handleTimeRangeChange(tr.value);
+              }}
+              title={tr.label}
+              className={`px-1.5 py-0.5 text-xs rounded transition-colors ${
                 timeRange === tr.value
                   ? 'bg-primary/15 text-primary'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {tr.label}
+              {tr.short}
             </button>
           ))}
+          <button
+            onClick={openCustom}
+            className={`px-1.5 py-0.5 text-xs rounded transition-colors ${
+              timeRange === CUSTOM_RANGE_VALUE || showCustom
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            自定义
+          </button>
         </div>
       </div>
+
+      {showCustom && (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-border text-xs">
+          <input
+            type="datetime-local"
+            value={customStartInput}
+            onChange={(e) => setCustomStartInput(e.target.value)}
+            className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+          />
+          <span className="text-muted-foreground">至</span>
+          <input
+            type="datetime-local"
+            value={customEndInput}
+            onChange={(e) => setCustomEndInput(e.target.value)}
+            className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+          />
+          <button
+            onClick={applyCustom}
+            className="px-2 py-1 rounded text-xs bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
+          >
+            查询
+          </button>
+          <span className="text-muted-foreground">聚合间隔：{intervalLabel(interval)}</span>
+        </div>
+      )}
+
       {timeRangeStr && (
         <div className="px-4 py-1 text-xs text-muted-foreground border-b border-border">
           {timeRangeStr}

@@ -6,6 +6,12 @@ import { CategoryNav } from '@/components/sensors/category-nav';
 import { SensorChart } from '@/components/sensors/sensor-chart';
 import { LazyLoad } from '@/components/sensors/lazy-load';
 import { classifySensor, UNIT_MAP, isSuspectReading, type SensorType } from '@/lib/sensor-classifier';
+import {
+  TIME_RANGE_PRESETS,
+  CUSTOM_RANGE_VALUE,
+  localInputToMs,
+  msToLocalInput,
+} from '@/lib/time-range';
 
 interface SensorReading {
   device_id: string;
@@ -29,6 +35,9 @@ export default function SensorsPage() {
   const [historyData, setHistoryData] = useState<Record<string, SensorHistory[]>>({});
   const [activeType, setActiveType] = useState<SensorType | 'all'>('all');
   const [timeRange, setTimeRange] = useState('1h');
+  const [customRange, setCustomRange] = useState<{ start: number; end: number } | null>(null);
+  const [customStartInput, setCustomStartInput] = useState('');
+  const [customEndInput, setCustomEndInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
@@ -38,7 +47,12 @@ export default function SensorsPage() {
 
   // SSE 实时订阅：最新数据每 2s 推送，历史随服务端缓存（15s）自动刷新
   useEffect(() => {
-    const es = new EventSource(`/api/stream?type=sensors&time_range=${timeRange}`);
+    const params = new URLSearchParams({ type: 'sensors', time_range: timeRange });
+    if (customRange) {
+      params.set('start', String(customRange.start));
+      params.set('end', String(customRange.end));
+    }
+    const es = new EventSource(`/api/stream?${params.toString()}`);
     es.onopen = () => setConnected(true);
     es.onmessage = (e) => {
       try {
@@ -66,7 +80,7 @@ export default function SensorsPage() {
       setConnected(false);
     };
     return () => es.close();
-  }, [timeRange]);
+  }, [timeRange, customRange]);
 
   // 历史参考区间（全量统计，服务端缓存 10 分钟）
   useEffect(() => {
@@ -116,14 +130,24 @@ export default function SensorsPage() {
     });
   }, [latestData, activeType, hideOffline, searchQuery]);
 
-  const timeRangeOptions = [
-    { value: '10m', label: '10分钟' },
-    { value: '30m', label: '30分钟' },
-    { value: '1h', label: '1小时' },
-    { value: '6h', label: '6小时' },
-    { value: '12h', label: '12小时' },
-    { value: '24h', label: '24小时' },
-  ];
+  const handleRangeSelect = (value: string) => {
+    setTimeRange(value);
+    if (value === CUSTOM_RANGE_VALUE) {
+      const end = customRange?.end ?? Date.now();
+      const start = customRange?.start ?? end - 7 * 24 * 3600_000;
+      setCustomStartInput(msToLocalInput(start));
+      setCustomEndInput(msToLocalInput(end));
+    } else {
+      setCustomRange(null);
+    }
+  };
+
+  const applyCustomRange = () => {
+    const s = localInputToMs(customStartInput);
+    const e = localInputToMs(customEndInput);
+    if (s === null || e === null) return;
+    setCustomRange({ start: Math.min(s, e), end: Math.max(s, e) });
+  };
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground overflow-hidden">
@@ -154,6 +178,13 @@ export default function SensorsPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
                 返回首页
+              </Link>
+
+              <Link
+                href="/history"
+                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
+              >
+                历史查询
               </Link>
 
               <h1 className="text-lg font-semibold text-foreground truncate">
@@ -199,16 +230,42 @@ export default function SensorsPage() {
                 <span className="text-xs text-muted-foreground">时间范围:</span>
                 <select
                   value={timeRange}
-                  onChange={(e) => setTimeRange(e.target.value)}
+                  onChange={(e) => handleRangeSelect(e.target.value)}
                   className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
                 >
-                  {timeRangeOptions.map((opt) => (
+                  {TIME_RANGE_PRESETS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
                   ))}
+                  <option value={CUSTOM_RANGE_VALUE}>自定义</option>
                 </select>
               </div>
+
+              {/* 自定义日期区间（选择「自定义」后出现） */}
+              {timeRange === CUSTOM_RANGE_VALUE && (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="datetime-local"
+                    value={customStartInput}
+                    onChange={(e) => setCustomStartInput(e.target.value)}
+                    className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+                  />
+                  <span className="text-xs text-muted-foreground">至</span>
+                  <input
+                    type="datetime-local"
+                    value={customEndInput}
+                    onChange={(e) => setCustomEndInput(e.target.value)}
+                    className="bg-card border border-border-strong rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:border-primary"
+                  />
+                  <button
+                    onClick={applyCustomRange}
+                    className="px-2 py-1 rounded text-xs bg-primary/15 text-primary hover:bg-primary/25 transition-colors"
+                  >
+                    查询
+                  </button>
+                </div>
+              )}
 
               {lastUpdate && (
                 <span className="text-xs text-muted-foreground tabular-nums">

@@ -13,7 +13,7 @@ export async function GET(request: Request) {
 
   // 只透传白名单参数
   const params: Record<string, string> = {};
-  for (const key of ['type', 'kiln_id', 'time_range', 'sensors']) {
+  for (const key of ['type', 'kiln_id', 'time_range', 'start', 'end', 'sensors']) {
     const value = searchParams.get(key);
     if (value !== null) params[key] = value;
   }
