@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
       id,
       name,
       file: `/imports/${filename}`,
-      apiBaseUrl: apiBaseUrl || '.',
+      apiBaseUrl: apiBaseUrl,
       createdAt: new Date().toISOString(),
     };
     systems.push(newSystem);
@@ -122,7 +122,7 @@ export async function PUT(req: NextRequest) {
 
     // 更新元数据
     systems[idx].name = name;
-    systems[idx].apiBaseUrl = apiBaseUrl || '.';
+    systems[idx].apiBaseUrl = apiBaseUrl;
     saveSystems(systems);
 
     return NextResponse.json({ success: true, data: systems[idx] });

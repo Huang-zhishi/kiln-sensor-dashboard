@@ -18,7 +18,7 @@ export default function ImportPageContent() {
   const editId = searchParams.get('id');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
-  const [apiBaseUrl, setApiBaseUrl] = useState('.');
+  const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +38,7 @@ export default function ImportPageContent() {
           if (sys) {
             setEditSystem(sys);
             setName(sys.name);
-            setApiBaseUrl(sys.apiBaseUrl || '.');
+            setApiBaseUrl(sys.apiBaseUrl || '');
           } else {
             setError('未找到该系统');
           }
@@ -227,7 +227,7 @@ export default function ImportPageContent() {
                 type="text"
                 value={apiBaseUrl}
                 onChange={(e) => setApiBaseUrl(e.target.value)}
-                placeholder="输入 . 使用同源 API，或输入完整 URL"
+                placeholder="留空使用同源 API，或输入完整 URL"
                 className="w-full px-3 py-2 rounded text-sm outline-none transition-colors focus:border-cyan-500/50"
                 style={{
                   background: 'rgba(255,255,255,0.05)',
@@ -236,7 +236,7 @@ export default function ImportPageContent() {
                 }}
               />
               <p className="text-xs mt-1" style={{ color: '#64748b' }}>
-                输入 <code className="px-1 rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>.</code> 使用同源 API（默认），或输入完整地址如 <code className="px-1 rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>https://api.example.com</code>
+                <strong>留空</strong> 使用同源 API（默认，推荐）；仅当流程图需要跨域访问时才填完整地址，如 <code className="px-1 rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>https://api.example.com</code>
               </p>
             </div>
 

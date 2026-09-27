@@ -31,7 +31,7 @@ ENV NODE_ENV=production \
 # 非 root 运行
 RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 
-COPY --from=build /app/public ./public
+COPY --from=build --chown=nextjs:nodejs /app/public ./public
 COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
 

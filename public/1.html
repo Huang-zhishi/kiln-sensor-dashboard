@@ -56,11 +56,14 @@
   .tval{font-size:9px;fill:var(--text3);font-family:inherit;pointer-events:none}
   .pipe{fill:none;stroke-linecap:round;stroke-linejoin:round}
   .flow-dot{pointer-events:none}
-  #layerFlow{filter:drop-shadow(0 0 2px rgba(156,153,255,.45))}
+  #layerFlow{pointer-events:none}
   .equip-group{cursor:pointer}
   .equip-group .equip-hoverbox{fill:rgba(156,153,255,0);}
-  .equip-group:hover{filter:drop-shadow(0 0 6px var(--purple))}
-  .equip-group.selected{filter:drop-shadow(0 0 9px var(--cyan))}
+  /* 注：SVG 中 drop-shadow filter 会触发逐帧光栅化重算，改用描边加粗 */
+  .equip-group:hover .equip-body{stroke-width:2.2}
+  .equip-group.selected .equip-body{stroke-width:2.5;stroke:var(--cyan)}
+  .equip-group:hover .mon-panel{stroke-width:2}
+  .equip-group.selected .mon-panel{stroke-width:2.2;stroke:var(--cyan)}
 
   /* Hover panel */
   .hover-panel{position:fixed;z-index:60;pointer-events:none;min-width:190px;max-width:260px;background:#12112Bf2;backdrop-filter:blur(8px);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px #000a;opacity:0;transform:translateY(4px);transition:opacity .12s,transform .12s}
@@ -164,6 +167,7 @@
       <rect id="bgGrid" width="2000" height="1200" fill="url(#gridMajor)"/>
       <g id="layerPipes"></g>
       <g id="layerEquip"></g>
+      <g id="layerTop"></g>
       <g id="layerFlow"></g>
     </svg>
 
@@ -208,74 +212,21 @@
 </div>
 
 <script>/* ============================================================
- * PFD Editor · 工艺流程组态编辑器
- * 全可编辑 · 拖拽搭建 · 端口连线 · 运行动画
+ * PFD Editor · 组件模板库（templates.js）
+ *    定义全部设备组件的 SVG 绘制模板，与编辑器逻辑解耦。
+ *    本文件必须先于 editor.js 加载（render 函数在运行期才被调用，
+ *    其中引用的工具函数由 editor.js 提供，经全局作用域解析）。
+ *
+ *    每个模板: { name, category, icon, defaultSize, ports, render(w,h,p) }
+ *      - name/category/icon  面板显示用
+ *      - defaultSize         拖入画布时的初始尺寸
+ *      - ports: [{id, x, y, dir}]  x,y 为 0-1 相对坐标, dir 为出向
+ *      - render(w,h,p)       返回内部 SVG 字符串（不含外层 <g>）
+ *    新增组件：在 TEMPLATES 中按上述契约追加一项即可，
+ *    组件面板（editor.js buildPalette）会按 category 自动归组。
  * ============================================================ */
 'use strict';
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const $ = id => document.getElementById(id);
-// DOM references - null on preview page
-const svg = $('canvas');
-const layerPipes = $('layerPipes');
-const layerEquip = $('layerEquip');
-const layerFlow = $('layerFlow');
-const layerOverlay = $('layerOverlay');
-const _isEditor = !!$('btnSave'); // true when running on editor page (has toolbar buttons)
-
-/* ============================================================
- * 0. 后端传感器 API（编辑器与预览页共用）
- *    - 通过 http(s):// 访问时使用相对路径 /api/*，由当前服务器代理转发（避免CORS问题）；
- *    - file:// 协议下直连远端地址（需后端支持CORS，否则会失败）；
- *    - 可通过 URL 参数 ?api= 覆盖（如 editor.html?api=https://xx.xx），便于切换环境。
- * ============================================================ */
-const _apiParam = new URLSearchParams(location.search).get('api');
-const _isFileProtocol = location.protocol === 'file:';
-const SENSOR_API_BASE = _apiParam || (_isFileProtocol ? 'https://3hztnx4mgj.coze.site' : '');
-const SENSOR_API = {
-  async _get(path){
-    const ctrl = typeof AbortController!=='undefined' ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(()=>ctrl.abort(), 5000) : null;
-    try{
-      const r = await fetch(SENSOR_API_BASE + path, ctrl?{signal:ctrl.signal}:{});
-      if(!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json().catch(()=>null);
-      return j && j.success ? j : null;
-    }finally{
-      if(timer) clearTimeout(timer);
-    }
-  },
-  // 传感器目录: [{sensor_tag, type, kiln_id}]
-  list(){ return this._get('/api/sensors/list'); },
-  // 实时数值: 可按 sensor_tag / type / kiln_id / limit 过滤
-  values(q={}){
-    const p = new URLSearchParams();
-    if(q.sensor_tag) p.set('sensor_tag', q.sensor_tag);
-    if(q.type) p.set('type', q.type);
-    if(q.kiln_id) p.set('kiln_id', q.kiln_id);
-    if(q.limit) p.set('limit', q.limit);
-    const qs = p.toString();
-    return this._get('/api/sensors/values' + (qs?'?'+qs:''));
-  },
-  // 历史数据: 按 sensor_tag 查询，支持 time_range(10m/30m/1h/6h/12h/24h) 或 start/end
-  history(q={}){
-    const p = new URLSearchParams();
-    if(q.sensor_tag) p.set('sensor_tag', q.sensor_tag);
-    if(q.time_range) p.set('time_range', q.time_range);
-    if(q.start) p.set('start', q.start);
-    if(q.end) p.set('end', q.end);
-    if(q.limit) p.set('limit', q.limit);
-    const qs = p.toString();
-    return this._get('/api/sensors/history' + (qs?'?'+qs:''));
-  }
-};
-
-/* ============================================================
- * 1. 组件模板库
- *    每个模板: { name, category, icon, defaultSize, ports, render(w,h,p) }
- *    ports: [{id, x, y, dir}]  x,y 为 0-1 相对坐标, dir 为出向
- *    render 返回内部 SVG 字符串(不含外层 g)
- * ============================================================ */
 const TEMPLATES = {
   silo: {
     name: '料仓', category: '设备',
@@ -1229,300 +1180,74 @@ const TEMPLATES = {
   blower: {
     name: '离心风机/鼓风机', category: '设备',
     defaultSize: { w: 150, h: 130 },
-    ports: [{id:'in',x:0,y:.58,dir:'left'},{id:'out',x:.5,y:0,dir:'up'}],
+    ports: [{id:'in',x:0,y:.56,dir:'left'},{id:'out',x:.52,y:0,dir:'up'}],
     render: (w,h,p)=>{
       const c = p.color;
-      const cx = w*0.54;
+      const cx = w*0.52;
       const cy = h*0.56;
-      const R = Math.min(w,h)*0.34;
-      const inDia = w*0.19;
-      const outW = w*0.22;
-      const outH = h*0.17;
+      const R = Math.min(w,h)*0.32;
+      const inDia = w*0.20;
+      const outW = w*0.30;
+      const outH = h*0.24;
       const outX = cx - outW/2;
-      const outY = h*0.05;
-      const inX = w*0.02;
+      const outY = h*0.09;
+      const inX = w*0.03;
       const inY = cy;
-      const motorW = w*0.24;
-      const motorH = h*0.26;
-      const motorX = cx + R*0.95;
-      const motorY = cy - motorH/2;
-      const bearingW = w*0.10;
-      const bearingH = h*0.16;
-      const bearingX = cx + R*0.78;
-      const bearingY = cy - bearingH/2;
-      const baseY = h*0.92;
-      const baseH = h*0.07;
-      const dampH = h*0.025;
+      const impellerR = R*0.70;
+      const hubR = R*0.20;
+      const inletEyeR = R*0.35;
 
-      // 螺栓绘制函数
-      const bolt = (bx,by,r=1.8)=>`<circle cx="${bx}" cy="${by}" r="${r}" fill="#0d0b20" stroke="${c}" stroke-width="0.6"/><circle cx="${bx}" cy="${by}" r="${r*0.4}" fill="${c}" opacity="0.5"/>`;
-      // 螺栓对（上下排列）
-      const boltPair = (bx,by,dist=5,r=1.3)=>bolt(bx,by-dist/2,r)+bolt(bx,by+dist/2,r);
-
-      // 1. 减振器（弹簧减震垫）
-      const dampers = `
-        <!-- 风机侧减振器 -->
-        <rect x="${cx-R*0.85}" y="${baseY-dampH}" width="18" height="${dampH}" fill="#1a1835" stroke="${c}" stroke-width="0.6"/>
-        <line x1="${cx-R*0.85+3}" y1="${baseY-dampH}" x2="${cx-R*0.85+3}" y2="${baseY}" stroke="${c}" stroke-width="0.4" opacity="0.4"/>
-        <line x1="${cx-R*0.85+9}" y1="${baseY-dampH}" x2="${cx-R*0.85+9}" y2="${baseY}" stroke="${c}" stroke-width="0.4" opacity="0.4"/>
-        <line x1="${cx-R*0.85+15}" y1="${baseY-dampH}" x2="${cx-R*0.85+15}" y2="${baseY}" stroke="${c}" stroke-width="0.4" opacity="0.4"/>
-        <!-- 电机侧减振器 -->
-        <rect x="${motorX+2}" y="${baseY-dampH}" width="${motorW-4}" height="${dampH}" fill="#1a1835" stroke="${c}" stroke-width="0.6"/>
-        <line x1="${motorX+6}" y1="${baseY-dampH}" x2="${motorX+6}" y2="${baseY}" stroke="${c}" stroke-width="0.4" opacity="0.4"/>
-        <line x1="${motorX+motorW-6}" y1="${baseY-dampH}" x2="${motorX+motorW-6}" y2="${baseY}" stroke="${c}" stroke-width="0.4" opacity="0.4"/>`;
-
-      // 2. 底座（含加强筋）
-      const base = `
-        <rect x="${w*0.06}" y="${baseY}" width="${w*0.88}" height="${baseH}" rx="2" fill="#151330" stroke="${c}" stroke-width="1"/>
-        <rect x="${w*0.08}" y="${baseY+1}" width="${w*0.84}" height="${baseH-2}" fill="#0f0d24" opacity="0.6"/>
-        <!-- 底座加强筋 -->
-        <line x1="${w*0.08}" y1="${baseY+baseH/2}" x2="${w*0.92}" y2="${baseY+baseH/2}" stroke="${c}" stroke-width="0.5" opacity="0.3"/>
-        <!-- 地脚螺栓孔 -->
-        ${bolt(w*0.10, baseY+baseH/2, 1.6)}
-        ${bolt(w*0.90, baseY+baseH/2, 1.6)}
-        ${bolt(w*0.28, baseY+baseH/2, 1.4)}
-        ${bolt(w*0.72, baseY+baseH/2, 1.4)}
-        ${bolt(w*0.45, baseY+baseH/2, 1.4)}`;
-
-      // 3. 蜗壳轮廓（蜗牛形状 - 使用渐开线近似，更精确的工业蜗壳）
+      // 蜗壳型线（蜗牛形 - 4段等距扩张近似）
       const volutePoints = [];
       const segments = 72;
       for(let i=0; i<=segments; i++){
         const angle = (i/segments) * Math.PI * 1.85 - Math.PI*0.25;
-        // 蜗壳型线：4段等距扩张（矩形蜗壳近似）
         const seg4 = Math.floor(i/(segments/4));
         const t4 = (i%(segments/4))/(segments/4);
-        const expansion = 1 + (seg4 + t4)*0.11;
-        const r = R * expansion;
-        const x = cx + Math.cos(angle)*r;
-        const y = cy + Math.sin(angle)*r;
-        volutePoints.push({x, y, angle, r, expansion});
+        const r = R * (1 + (seg4 + t4)*0.11);
+        volutePoints.push({x: cx + Math.cos(angle)*r, y: cy + Math.sin(angle)*r});
       }
-      // 蜗壳路径：从出风口左侧开始，绕蜗壳到出风口右侧，闭合
       const tongueX = cx - R*0.08;
       const tongueY = cy + R*0.05;
       const volutePathD = [
         `M ${outX} ${outY}`,
         `L ${outX} ${outY+outH}`,
         `Q ${cx-R*0.25} ${cy+R*0.15} ${tongueX} ${tongueY}`,
-        ...volutePoints.map(p=>`L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`),
+        ...volutePoints.map(pt=>`L ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`),
         `Q ${cx+R*0.3} ${cy-R*0.1} ${outX+outW} ${outY+outH}`,
         `L ${outX+outW} ${outY}`,
         'Z'
       ].join(' ');
 
-      // 蜗壳中分面（上下合箱面）
-      const splitLineY = cy + R*0.05;
-      const splitLineX1 = cx - R*0.1;
-      const splitLineX2 = cx + R*1.35;
-
-      // 蜗壳合箱螺栓（沿中分面排列）
-      let casingBolts = '';
-      for(let i=0; i<6; i++){
-        const bx = splitLineX1 + i*((splitLineX2-splitLineX1)/5);
-        const by = splitLineY;
-        if(bx < cx+R*1.3 && bx > cx-R*0.9){
-          casingBolts += bolt(bx, by, 1.3);
-        }
-      }
-
-      // 蜗壳焊缝（沿渐开线间断线条）
-      let weldSeams = '';
-      for(let i=0; i<volutePoints.length-1; i+=3){
-        const p1 = volutePoints[i];
-        const p2 = volutePoints[Math.min(i+2, volutePoints.length-1)];
-        weldSeams += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${c}" stroke-width="0.6" opacity="0.35" stroke-dasharray="1.5,1"/>`;
-      }
-
-      // 蜗壳检查孔/手孔
-      const inspectHole = `
-        <ellipse cx="${cx+R*0.1}" cy="${cy-R*0.5}" rx="8" ry="6" fill="#0d0b20" stroke="${c}" stroke-width="1"/>
-        <ellipse cx="${cx+R*0.1}" cy="${cy-R*0.5}" rx="6" ry="4.5" fill="#151330" stroke="${c}" stroke-width="0.6"/>
-        ${bolt(cx+R*0.1-6, cy-R*0.5, 1.2)}
-        ${bolt(cx+R*0.1+6, cy-R*0.5, 1.2)}
-        ${bolt(cx+R*0.1, cy-R*0.5-4, 1.2)}
-        ${bolt(cx+R*0.1, cy-R*0.5+4, 1.2)}
-        <circle cx="${cx+R*0.1}" cy="${cy-R*0.5}" r="1.5" fill="${c}" opacity="0.4"/>`;
-
-      // 蜗壳放水塞（底部）
-      const drainPlug = `
-        <rect x="${cx+R*0.5-3}" y="${cy+R*0.95}" width="6" height="4" fill="#151330" stroke="${c}" stroke-width="0.7"/>
-        <circle cx="${cx+R*0.5}" cy="${cy+R*0.95+4}" r="2" fill="#0d0b20" stroke="${c}" stroke-width="0.6"/>`;
-
-      // 蜗壳侧板（表现厚度效果）
-      const voluteSide = `
-        <!-- 蜗壳左侧板厚度（深色偏移） -->
-        <path d="${volutePathD}" fill="none" stroke="#0a0818" stroke-width="3" opacity="0.5" transform="translate(-2,1)"/>`;
-
-      // 4. 出风口（含扩压器）
-      const outlet = `
-        <!-- 出风口扩压器（渐扩管） -->
-        <path d="M ${outX+2} ${outY+outH} L ${outX-3} ${outY+outH+8} L ${outX+outW+3} ${outY+outH+8} L ${outX+outW-2} ${outY+outH} Z" fill="#151330" stroke="${c}" stroke-width="0.9"/>
-        <!-- 出风口直管 -->
-        <rect x="${outX}" y="${outY}" width="${outW}" height="${outH}" fill="url(#gEquip)" stroke="${c}" stroke-width="1.3"/>
-        <!-- 出风口导流叶片 -->
-        <line x1="${outX+outW*0.3}" y1="${outY+2}" x2="${outX+outW*0.25}" y2="${outY+outH-2}" stroke="${c}" stroke-width="0.6" opacity="0.4"/>
-        <line x1="${outX+outW*0.7}" y1="${outY+2}" x2="${outX+outW*0.75}" y2="${outY+outH-2}" stroke="${c}" stroke-width="0.6" opacity="0.4"/>
-        <!-- 出风口法兰 -->
-        <rect x="${outX-5}" y="${outY-5}" width="${outW+10}" height="6" rx="1" fill="#1a1835" stroke="${c}" stroke-width="1"/>
-        ${bolt(outX-2, outY-2, 1.5)}
-        ${bolt(outX+outW+2, outY-2, 1.5)}
-        ${bolt(outX+outW/2, outY-2, 1.5)}
-        <!-- 法兰密封槽线 -->
-        <rect x="${outX-2}" y="${outY-3}" width="${outW+4}" height="2" fill="none" stroke="${c}" stroke-width="0.4" opacity="0.3"/>`;
-
-      // 5. 进风口（含调节风门）
-      const damperBlades = Array.from({length:5}).map((_,i)=>{
-        const dy = inY - inDia/2 + 4 + i*((inDia-8)/4);
-        return `<line x1="${inX+1}" y1="${dy}" x2="${inX+7}" y2="${dy}" stroke="${c}" stroke-width="1.2" opacity="0.6"/>`;
-      }).join('');
-      
+      // 进风口（收敛集风器 + 法兰）
       const inlet = `
-        <!-- 进风口集风器（弧形收敛管） -->
-        <path d="M ${inX-1} ${inY-inDia/2} Q ${inX+R*0.3} ${inY-inDia*0.15} ${cx-R*0.65} ${inY-inDia*0.32} L ${cx-R*0.65} ${inY+inDia*0.32} Q ${inX+R*0.3} ${inY+inDia*0.15} ${inX-1} ${inY+inDia/2} Z" fill="#1a1835" stroke="${c}" stroke-width="1.3"/>
-        <!-- 进风口直管段 -->
-        <rect x="${inX-1}" y="${inY-inDia/2}" width="9" height="${inDia}" fill="url(#gEquip)" stroke="${c}" stroke-width="1.2"/>
-        <!-- 进口调节风门叶片 -->
-        ${damperBlades}
-        <!-- 风门执行器手柄 -->
-        <rect x="${inX+3}" y="${inY-inDia/2-5}" width="3" height="6" fill="#151330" stroke="${c}" stroke-width="0.7"/>
-        <circle cx="${inX+4.5}" cy="${inY-inDia/2-5}" r="2" fill="${c}" opacity="0.5"/>
-        <!-- 进风口法兰 -->
-        <rect x="${inX-5}" y="${inY-inDia/2-3}" width="7" height="${inDia+6}" rx="1" fill="#1a1835" stroke="${c}" stroke-width="1"/>
-        ${boltPair(inX-1.5, inY, inDia*0.65, 1.3)}
-        <!-- 法兰密封线 -->
-        <rect x="${inX-3}" y="${inY-inDia/2-1}" width="3" height="${inDia+2}" fill="none" stroke="${c}" stroke-width="0.4" opacity="0.3"/>`;
+        <path d="M ${inX} ${inY-inDia/2} Q ${inX+R*0.3} ${inY-inDia*0.15} ${cx-R*0.62} ${inY-inDia*0.32} L ${cx-R*0.62} ${inY+inDia*0.32} Q ${inX+R*0.3} ${inY+inDia*0.15} ${inX} ${inY+inDia/2} Z" fill="#1a1835" stroke="${c}" stroke-width="1.3"/>
+        <rect x="${inX-4}" y="${inY-inDia/2-3}" width="5" height="${inDia+6}" rx="1" fill="#1a1835" stroke="${c}" stroke-width="1.2"/>`;
 
-      // 进风口导流锥/集流器
-      const inletGuide = `
-        <ellipse cx="${cx-R*0.6}" cy="${inY}" rx="${inDia*0.28}" ry="${inDia*0.22}" fill="#0d0b20" stroke="${c}" stroke-width="0.7" opacity="0.8"/>
-        <ellipse cx="${cx-R*0.5}" cy="${inY}" rx="${inDia*0.12}" ry="${inDia*0.1}" fill="none" stroke="${c}" stroke-width="0.5" opacity="0.4"/>`;
+      // 出风口（加大直管段 + 法兰）
+      const outlet = `
+        <rect x="${outX}" y="${outY}" width="${outW}" height="${outH}" fill="#1a1835" stroke="${c}" stroke-width="1.5"/>
+        <rect x="${outX-6}" y="${outY-5}" width="${outW+12}" height="6" rx="1" fill="#1a1835" stroke="${c}" stroke-width="1.2"/>`;
 
-      // 6. 轴承箱（风机侧轴承座）
-      const bearingHousing = `
-        <!-- 轴承箱主体 -->
-        <rect x="${bearingX}" y="${bearingY}" width="${bearingW}" height="${bearingH}" rx="3" fill="url(#gEquip)" stroke="${c}" stroke-width="1.2"/>
-        <!-- 轴承箱上下盖合箱螺栓 -->
-        ${bolt(bearingX+bearingW/2, bearingY+2, 1.4)}
-        ${bolt(bearingX+bearingW/2, bearingY+bearingH-2, 1.4)}
-        ${bolt(bearingX+2, bearingY+bearingH/2, 1.2)}
-        ${bolt(bearingX+bearingW-2, bearingY+bearingH/2, 1.2)}
-        <!-- 轴承端盖 -->
-        <circle cx="${bearingX}" cy="${cy}" r="${bearingH/2-2}" fill="#151330" stroke="${c}" stroke-width="1"/>
-        <circle cx="${bearingX}" cy="${cy}" r="${bearingH/2-5}" fill="#0d0b20" stroke="${c}" stroke-width="0.6"/>
-        <!-- 油位计/油标 -->
-        <rect x="${bearingX+bearingW+1}" y="${cy-4}" width="3" height="8" fill="#0d0b20" stroke="${c}" stroke-width="0.6"/>
-        <rect x="${bearingX+bearingW+1.5}" y="${cy-2}" width="2" height="4" fill="#7ec8ff" opacity="0.5"/>
-        <!-- 轴承温度计接口 -->
-        <circle cx="${bearingX+bearingW/2}" cy="${bearingY-2}" r="1.5" fill="#151330" stroke="${c}" stroke-width="0.5"/>
-        <!-- 轴承箱底座 -->
-        <rect x="${bearingX+2}" y="${bearingY+bearingH}" width="${bearingW-4}" height="4" fill="#0d0b20" stroke="${c}" stroke-width="0.7"/>
-        ${bolt(bearingX+4, bearingY+bearingH+2, 1.1)}
-        ${bolt(bearingX+bearingW-4, bearingY+bearingH+2, 1.1)}`;
-
-      // 7. 电机
-      const motor = `
-        <!-- 电机吊环 -->
-        <ellipse cx="${motorX+motorW/2}" cy="${motorY-3}" rx="3" ry="2.5" fill="none" stroke="${c}" stroke-width="0.8"/>
-        <!-- 电机主体 -->
-        <rect x="${motorX}" y="${motorY}" width="${motorW}" height="${motorH}" rx="4" fill="url(#gEquip)" stroke="${c}" stroke-width="1.3"/>
-        <!-- 电机散热筋 -->
-        ${Array.from({length:7}).map((_,i)=>{
-          const ribX = motorX + 3 + i*((motorW-6)/6);
-          return `<line x1="${ribX}" y1="${motorY+3}" x2="${ribX}" y2="${motorY+motorH-3}" stroke="${c}" stroke-width="0.5" opacity="0.35"/>`;
-        }).join('')}
-        <!-- 电机非传动端盖（风扇罩） -->
-        <ellipse cx="${motorX+motorW}" cy="${cy}" rx="${motorH/2+2}" ry="${motorH/2+1}" fill="#151330" stroke="${c}" stroke-width="1"/>
-        <ellipse cx="${motorX+motorW}" cy="${cy}" rx="${motorH/2-2}" ry="${motorH/2-3}" fill="none" stroke="${c}" stroke-width="0.5" opacity="0.4"/>
-        <!-- 风扇罩通风孔 -->
-        ${Array.from({length:5}).map((_,i)=>{
-          const va = -Math.PI/2 + (i-2)*0.3;
-          const vx = motorX+motorW + Math.cos(va)*(motorH/2-4);
-          const vy = cy + Math.sin(va)*(motorH/2-4);
-          return `<circle cx="${vx.toFixed(1)}" cy="${vy.toFixed(1)}" r="1" fill="#0d0b20" opacity="0.6"/>`;
-        }).join('')}
-        <!-- 电机传动端盖 -->
-        <ellipse cx="${motorX}" cy="${cy}" rx="${motorH/2+1}" ry="${motorH/2}" fill="#1a1835" stroke="${c}" stroke-width="1.2"/>
-        <circle cx="${motorX}" cy="${cy}" r="3.5" fill="#0d0b20" stroke="${c}" stroke-width="0.8"/>
-        <circle cx="${motorX}" cy="${cy}" r="1.5" fill="${c}" opacity="0.6"/>
-        <!-- 电机接线盒 -->
-        <rect x="${motorX+motorW*0.3}" y="${motorY-7}" width="${motorW*0.35}" height="8" rx="1" fill="#151330" stroke="${c}" stroke-width="0.8"/>
-        <rect x="${motorX+motorW*0.38}" y="${motorY-10}" width="${motorW*0.19}" height="4" rx="0.5" fill="#0d0b20" stroke="${c}" stroke-width="0.5"/>
-        <!-- 电机铭牌 -->
-        <rect x="${motorX+motorW*0.15}" y="${motorY+5}" width="14" height="7" rx="0.5" fill="#0d0b20" stroke="${c}" stroke-width="0.5"/>
-        <text x="${motorX+motorW*0.15+7}" y="${motorY+10}" text-anchor="middle" fill="${c}" font-size="3.5" opacity="0.6">Y2</text>
-        <!-- 电机底座 -->
-        <rect x="${motorX+2}" y="${motorY+motorH}" width="${motorW-4}" height="5" fill="#0d0b20" stroke="${c}" stroke-width="0.7"/>
-        ${bolt(motorX+5, motorY+motorH+2.5, 1.2)}
-        ${bolt(motorX+motorW-5, motorY+motorH+2.5, 1.2)}`;
-
-      // 8. 主轴和联轴器（弹性联轴器）
-      const shaft = `
-        <!-- 风机侧轴 -->
-        <rect x="${cx+R*0.72}" y="${cy-2.5}" width="${bearingX-(cx+R*0.72)}" height="5" fill="#1a1835" stroke="${c}" stroke-width="0.7"/>
-        <!-- 电机侧轴 -->
-        <rect x="${bearingX+bearingW}" y="${cy-2.5}" width="${motorX-(bearingX+bearingW)}" height="5" fill="#1a1835" stroke="${c}" stroke-width="0.7"/>
-        <!-- 联轴器 halves -->
-        <rect x="${bearingX+bearingW+1}" y="${cy-6}" width="7" height="12" fill="#151330" stroke="${c}" stroke-width="0.9"/>
-        <rect x="${motorX-8}" y="${cy-6}" width="7" height="12" fill="#151330" stroke="${c}" stroke-width="0.9"/>
-        <!-- 联轴器弹性块 -->
-        <rect x="${bearingX+bearingW+7}" y="${cy-5}" width="3" height="10" fill="${c}" opacity="0.4"/>
-        <!-- 联轴器螺栓 -->
-        ${bolt(bearingX+bearingW+4.5, cy-4, 1.0)}
-        ${bolt(bearingX+bearingW+4.5, cy+4, 1.0)}
-        ${bolt(motorX-4.5, cy-4, 1.0)}
-        ${bolt(motorX-4.5, cy+4, 1.0)}`;
-
-      // 9. 蜗壳舌部（精确的蜗舌结构）
-      const voluteTongue = `
-        <path d="M ${tongueX-2} ${tongueY-3} Q ${tongueX+2} ${tongueY-5} ${tongueX+8} ${tongueY-2}" fill="none" stroke="${c}" stroke-width="1.2"/>
-        <path d="M ${tongueX-2} ${tongueY+3} Q ${tongueX+2} ${tongueY+2} ${tongueX+6} ${tongueY+1}" fill="none" stroke="${c}" stroke-width="0.8" opacity="0.6"/>`;
-
-      // 10. 叶轮（后弯式离心叶片，工业级）
-      const bladeCount = 14;
-      const impellerR = R*0.70;
-      const hubR = R*0.20;
-      const inletEyeR = R*0.35;
+      // 叶轮（后弯式离心叶片，连续旋转）
+      const bladeCount = 12;
       let blades = '';
       for(let i=0; i<bladeCount; i++){
         const angle = (i/bladeCount) * Math.PI*2;
-        // 后弯叶片：翼型截面
-        const b1a = angle + 0.15;
-        const b2a = angle + 0.65;
-        const b3a = angle + 0.75;
-        const b4a = angle + 0.08;
-        const bx1 = cx + Math.cos(b1a)*hubR;
-        const by1 = cy + Math.sin(b1a)*hubR;
-        const bx2 = cx + Math.cos(b2a)*impellerR;
-        const by2 = cy + Math.sin(b2a)*impellerR;
-        const bx3 = cx + Math.cos(b3a)*impellerR*0.97;
-        const by3 = cy + Math.sin(b3a)*impellerR*0.97;
-        const bx4 = cx + Math.cos(b4a)*hubR*1.05;
-        const by4 = cy + Math.sin(b4a)*hubR*1.05;
-        blades += `<polygon points="${bx1.toFixed(1)},${by1.toFixed(1)} ${bx2.toFixed(1)},${by2.toFixed(1)} ${bx3.toFixed(1)},${by3.toFixed(1)} ${bx4.toFixed(1)},${by4.toFixed(1)}" fill="${c}" opacity="0.4" stroke="${c}" stroke-width="0.5"/>`;
+        const b1a = angle + 0.15, b2a = angle + 0.65, b3a = angle + 0.75, b4a = angle + 0.08;
+        blades += `<polygon points="${(cx+Math.cos(b1a)*hubR).toFixed(1)},${(cy+Math.sin(b1a)*hubR).toFixed(1)} ${(cx+Math.cos(b2a)*impellerR).toFixed(1)},${(cy+Math.sin(b2a)*impellerR).toFixed(1)} ${(cx+Math.cos(b3a)*impellerR*0.97).toFixed(1)},${(cy+Math.sin(b3a)*impellerR*0.97).toFixed(1)} ${(cx+Math.cos(b4a)*hubR*1.05).toFixed(1)},${(cy+Math.sin(b4a)*hubR*1.05).toFixed(1)}" fill="${c}" opacity="0.4" stroke="${c}" stroke-width="0.5"/>`;
       }
-
       const impeller = `
         <g>
           <animateTransform attributeName="transform" type="rotate" from="0 ${cx} ${cy}" to="360 ${cx} ${cy}" dur="0.5s" repeatCount="indefinite"/>
-          <!-- 叶轮后盘 -->
           <circle cx="${cx}" cy="${cy}" r="${impellerR}" fill="#0f0d24" stroke="${c}" stroke-width="0.8" opacity="0.9"/>
-          <!-- 叶片 -->
           ${blades}
-          <!-- 叶轮前盘（锥形，进口口圈） -->
-          <circle cx="${cx}" cy="${cy}" r="${impellerR}" fill="none" stroke="${c}" stroke-width="1" opacity="0.5"/>
-          <circle cx="${cx}" cy="${cy}" r="${inletEyeR}" fill="none" stroke="${c}" stroke-width="0.8" opacity="0.6"/>
-          <circle cx="${cx}" cy="${cy}" r="${inletEyeR-3}" fill="#0d0b20" stroke="${c}" stroke-width="0.5" opacity="0.7"/>
-          <!-- 轮毂 -->
+          <circle cx="${cx}" cy="${cy}" r="${inletEyeR}" fill="#0d0b20" stroke="${c}" stroke-width="0.8" opacity="0.8"/>
           <circle cx="${cx}" cy="${cy}" r="${hubR}" fill="#1a1835" stroke="${c}" stroke-width="1"/>
-          <circle cx="${cx}" cy="${cy}" r="${hubR*0.6}" fill="${c}" opacity="0.25"/>
-          <circle cx="${cx}" cy="${cy}" r="${hubR*0.3}" fill="#0d0b20" stroke="${c}" stroke-width="0.7"/>
-          <!-- 轴头锁紧螺母 -->
-          <circle cx="${cx}" cy="${cy}" r="3" fill="#151330" stroke="${c}" stroke-width="0.8"/>
-          <line x1="${cx-2}" y1="${cy}" x2="${cx+2}" y2="${cy}" stroke="${c}" stroke-width="0.6"/>
+          <circle cx="${cx}" cy="${cy}" r="${hubR*0.4}" fill="${c}" opacity="0.35"/>
         </g>`;
 
-      // 11. 气流粒子（从入口到出口，更自然的流线）
+      // 气流粒子（进口→叶轮加速→出口）
       let airflowParticles = '';
       const particleCount = 8;
       for(let i=0; i<particleCount; i++){
@@ -1534,14 +1259,12 @@ const TEMPLATES = {
           const t = k/pSteps;
           let x, y, r, op;
           if(t < 0.3){
-            // 入口段：轴向进入，略收敛
             const entryT = t/0.3;
             x = inX + 8 + (cx-inletEyeR - (inX+8))*entryT;
             y = inY + startOffset*(1-entryT*0.7);
             r = 1.0 + entryT*0.6;
             op = entryT < 0.15 ? entryT/0.15*0.4 : 0.4 + entryT*0.2;
           } else if(t < 0.78){
-            // 蜗壳内旋转加速（1.5圈）
             const spinT = (t-0.3)/0.48;
             const spinAngle = Math.PI*0.6 + spinT*Math.PI*2.8;
             const spinR = inletEyeR + spinT*spinT*(impellerR-inletEyeR) + (1-spinT*0.3)*R*0.15;
@@ -1550,7 +1273,6 @@ const TEMPLATES = {
             r = 1.6 - spinT*0.4;
             op = 0.55 - spinT*0.1;
           } else {
-            // 出口段：经蜗壳收集向上流出扩压
             const outT = (t-0.78)/0.22;
             const easeOut = 1 - Math.pow(1-outT, 2);
             x = cx + (outX+outW/2 - cx + (outT-0.5)*5)*easeOut;
@@ -1569,63 +1291,26 @@ const TEMPLATES = {
           </circle>`;
       }
 
-      // 12. 转向标识（箭头+旋向）
-      const rotationArrow = `
-        <g opacity="0.5">
-          <path d="M ${cx+R*0.95} ${cy-R*0.3} A ${R*0.35} ${R*0.35} 0 0 1 ${cx+R*1.15} ${cy+R*0.1}" fill="none" stroke="${c}" stroke-width="1.2" stroke-dasharray="2,1"/>
-          <polygon points="${cx+R*1.18},${cy+R*0.05} ${cx+R*1.22},${cy+R*0.2} ${cx+R*1.08},${cy+R*0.12}" fill="${c}"/>
-        </g>`;
-
-      // 13. 详细铭牌
-      const nameplate = `
-        <rect x="${cx+R*0.3}" y="${cy+R*0.4}" width="28" height="14" rx="1" fill="#0d0b20" stroke="${c}" stroke-width="0.7"/>
-        <rect x="${cx+R*0.3+1}" y="${cy+R*0.4+1}" width="26" height="12" fill="#151330"/>
-        <text x="${cx+R*0.3+14}" y="${cy+R*0.4+5}" text-anchor="middle" fill="${c}" font-size="4.2" font-weight="bold" opacity="0.8">9-19 No.5A</text>
-        <text x="${cx+R*0.3+14}" y="${cy+R*0.4+9.5}" text-anchor="middle" fill="${c}" font-size="3.2" opacity="0.6">2900r/min</text>
-        <text x="${cx+R*0.3+14}" y="${cy+R*0.4+13}" text-anchor="middle" fill="${c}" font-size="3" opacity="0.5">→</text>
-        <!-- 铭牌铆钉 -->
-        <circle cx="${cx+R*0.3+2}" cy="${cy+R*0.4+2}" r="0.8" fill="${c}" opacity="0.5"/>
-        <circle cx="${cx+R*0.3+26}" cy="${cy+R*0.4+2}" r="0.8" fill="${c}" opacity="0.5"/>
-        <circle cx="${cx+R*0.3+2}" cy="${cy+R*0.4+12}" r="0.8" fill="${c}" opacity="0.5"/>
-        <circle cx="${cx+R*0.3+26}" cy="${cy+R*0.4+12}" r="0.8" fill="${c}" opacity="0.5"/>`;
-
       return `
-        ${dampers}
-        ${base}
-        ${voluteSide}
         <!-- 蜗壳后壁（深色底） -->
         <path d="${volutePathD}" fill="#0d0b20" stroke="${c}" stroke-width="1.8"/>
-        <!-- 蜗壳内部深色区域（叶轮室） -->
+        <!-- 叶轮室 -->
         <circle cx="${cx}" cy="${cy}" r="${R*0.76}" fill="#0a0818" opacity="0.85"/>
         ${inlet}
-        ${inletGuide}
         ${outlet}
-        ${bearingHousing}
-        ${voluteTongue}
+        <!-- 蜗壳外壳 -->
+        <path d="${volutePathD}" fill="url(#gEquip)" opacity="0.55" stroke="none"/>
+        <path d="${volutePathD}" fill="none" stroke="${c}" stroke-width="1.6"/>
         ${impeller}
         ${airflowParticles}
-        ${weldSeams}
-        ${inspectHole}
-        ${drainPlug}
-        <!-- 蜗壳外金属外壳 -->
-        <path d="${volutePathD}" fill="url(#gEquip)" opacity="0.7" stroke="none"/>
-        <path d="${volutePathD}" fill="none" stroke="${c}" stroke-width="1.4"/>
-        <!-- 蜗壳中分面 -->
-        <line x1="${splitLineX1}" y1="${splitLineY}" x2="${splitLineX2}" y2="${splitLineY}" stroke="${c}" stroke-width="1" opacity="0.5"/>
-        ${casingBolts}
-        ${shaft}
-        ${motor}
-        ${nameplate}
-        ${rotationArrow}
-        <!-- 出风口风向指示箭头（脉动效果） -->
-        <polygon points="${outX+outW/2-5},${outY-12} ${outX+outW/2+5},${outY-12} ${outX+outW/2},${outY-3}" fill="${c}" opacity="0.4">
-          <animate attributeName="opacity" values="0.2;0.7;0.2" dur="0.7s" repeatCount="indefinite"/>
-          <animate attributeName="transform" attributeType="XML" type="translate" values="0,0;0,-2;0,0" dur="0.7s" repeatCount="indefinite"/>
+        <!-- 出风口风向指示箭头（脉动） -->
+        <polygon points="${cx-8},${outY+outH*0.68} ${cx+8},${outY+outH*0.68} ${cx},${outY+outH*0.28}" fill="${c}" opacity="0.5">
+          <animate attributeName="opacity" values="0.25;0.8;0.25" dur="0.7s" repeatCount="indefinite"/>
         </polygon>
         <!-- 入口气流指示 -->
-        <g opacity="0.35">
-          <line x1="${inX-12}" y1="${inY}" x2="${inX-4}" y2="${inY}" stroke="${c}" stroke-width="1"/>
-          <polygon points="${inX-4},${inY-3} ${inX-4},${inY+3} ${inX+1},${inY}" fill="${c}"/>
+        <g opacity="0.4">
+          <line x1="${inX-12}" y1="${inY}" x2="${inX-4}" y2="${inY}" stroke="${c}" stroke-width="1.2"/>
+          <polygon points="${inX-4},${inY-3.5} ${inX-4},${inY+3.5} ${inX+1},${inY}" fill="${c}"/>
         </g>
       `;
     }
@@ -1637,7 +1322,7 @@ const TEMPLATES = {
       {id:'inlet',x:0,y:.44,dir:'left'},
       {id:'outlet',x:1,y:.76,dir:'right'},
       {id:'fuel',x:1,y:.55,dir:'right'},
-      {id:'flueGas',x:.1,y:0,dir:'up'}
+      {id:'flueGas',x:.1,y:.22,dir:'up'}
     ],
     render: (w,h,p)=>{
       const c = p.color;
@@ -1652,6 +1337,7 @@ const TEMPLATES = {
       const h_clipId = `clip_kiln_${Math.random().toString(36).substr(2,6)}`;
       const h_clipIdInner = `clip_kiln_in_${Math.random().toString(36).substr(2,6)}`;
       const kilnShadeId = `kiln_shade_${Math.random().toString(36).substr(2,6)}`;
+      const kilnTempGradId = `kiln_temp_${Math.random().toString(36).substr(2,6)}`;
       const baseY = h*0.94;
       
       const bolt = (bx,by,r=1.5)=>`<circle cx="${bx}" cy="${by}" r="${r}" fill="#0d0b20" stroke="${c}" stroke-width="0.5"/><circle cx="${bx}" cy="${by}" r="${r*0.4}" fill="${c}" opacity="0.5"/>`;
@@ -1726,6 +1412,10 @@ const TEMPLATES = {
         <stop offset="80%" stop-color="#3d2535"/>
         <stop offset="100%" stop-color="#2a1a25"/>
       </linearGradient>`;
+      // 温度渐变（测温点 → 颜色锚点，从左到右）
+      const tempPoints = (p.tempPoints && p.tempPoints.length) ? p.tempPoints : [];
+      const tempGrad = tempPoints.length ? `<linearGradient id="${kilnTempGradId}" x1="0" y1="0" x2="1" y2="0" class="kiln-temp-grad">${tempPoints.map((pt,i)=>`<stop class="kiln-temp-stop" data-kidx="${i}" offset="${((i/(tempPoints.length-1||1))*100).toFixed(1)}%" stop-color="#9C99FF"/>`).join('')}</linearGradient>` : '';
+      const tempOverlay = tempPoints.length ? `<rect class="kiln-temp-overlay" x="${h_drumL}" y="${h_drumTop}" width="${h_drumW}" height="${h_R*2}" rx="${h_R*0.25}" ry="${h_R}" fill="url(#${kilnTempGradId})" opacity="0.55" clip-path="url(#${h_clipId})"/>` : '';
       const clipDef = `<clipPath id="${h_clipId}"><rect x="${h_drumL}" y="${h_drumTop}" width="${h_drumW}" height="${h_R*2}" rx="${h_R*0.25}" ry="${h_R}"/></clipPath>`;
       const clipDefInner = `<clipPath id="${h_clipIdInner}"><rect x="${h_drumL+5}" y="${h_drumTop+5}" width="${h_drumW-10}" height="${h_R*2-10}" rx="${h_R*0.2}" ry="${h_R-5}"/></clipPath>`;
 
@@ -1867,7 +1557,7 @@ const TEMPLATES = {
       const inletPipeH = 14;
       const inletPipeY = inletPipeCY - inletPipeH/2;
       const inletPipeEndX = tailHoodX - tailHoodW + 1; // 右端接烟室左壁
-      // 烟气管：垂直管从烟室顶面接出到顶部
+      // 烟气管：垂直管从烟室顶面接出，高度为烟室顶到包围盒顶部的一半（法兰位于 h*0.22）
       const fluePipeW = 12;
       const fluePipeCX = w*0.1;
       const fluePipeX = fluePipeCX - fluePipeW/2;
@@ -1878,15 +1568,17 @@ const TEMPLATES = {
       const hoodYat = (x)=> hoodTopLy + hoodTopSlope*(x-hoodTopLx);
       const flueBaseL = fluePipeX-4, flueBaseR = fluePipeX+fluePipeW+4;
       const flueBaseLy = hoodYat(flueBaseL), flueBaseRy = hoodYat(flueBaseR);
+      const flueBaseY = Math.max(flueBaseLy, flueBaseRy) + 7; // 垂直管底（锥座顶）
+      const flueTopY = h*0.22;  // 管顶法兰上沿：烟囱高度减半（原画到 y=0 顶部）
       const tailHood = `
         <path d="M ${tailHoodX} ${h_cy-h_R*1.1} L ${tailHoodX-tailHoodW} ${h_cy-h_R*0.85} L ${tailHoodX-tailHoodW} ${h_cy+h_R*0.85} L ${tailHoodX} ${h_cy+h_R*1.1} Z" fill="#1a1835" stroke="${c}" stroke-width="1.3"/>
         <path d="M ${tailHoodX-3} ${h_cy-h_R*1.0} L ${tailHoodX-tailHoodW+2} ${h_cy-h_R*0.8} L ${tailHoodX-tailHoodW+2} ${h_cy+h_R*0.8} L ${tailHoodX-3} ${h_cy+h_R*1.0} Z" fill="#12102a" opacity="0.5"/>
-        <!-- 烟气出口管（锥形底座贴合烟室斜面焊接，垂直管到顶部法兰） -->
-        <path d="M ${flueBaseL} ${flueBaseLy} L ${fluePipeX} ${Math.max(flueBaseLy,flueBaseRy)+7} L ${fluePipeX} 5 L ${fluePipeX+fluePipeW} 5 L ${fluePipeX+fluePipeW} ${Math.max(flueBaseLy,flueBaseRy)+7} L ${flueBaseR} ${flueBaseRy} Z" fill="#151330" stroke="${c}" stroke-width="0.9"/>
-        <rect x="${fluePipeX+2}" y="8" width="3" height="${Math.max(flueBaseLy,flueBaseRy)+7-10}" fill="rgba(255,255,255,0.05)"/>
+        <!-- 烟气出口管（锥形底座贴合烟室斜面焊接，垂直管到半高法兰） -->
+        <path d="M ${flueBaseL} ${flueBaseLy} L ${fluePipeX} ${flueBaseY} L ${fluePipeX} ${flueTopY+5} L ${fluePipeX+fluePipeW} ${flueTopY+5} L ${fluePipeX+fluePipeW} ${flueBaseY} L ${flueBaseR} ${flueBaseRy} Z" fill="#151330" stroke="${c}" stroke-width="0.9"/>
+        <rect x="${fluePipeX+2}" y="${flueTopY+8}" width="3" height="${flueBaseY-flueTopY-10}" fill="rgba(255,255,255,0.05)"/>
         <!-- 顶部法兰 -->
-        <rect x="${fluePipeCX-10}" y="0" width="20" height="5" fill="#1a1835" stroke="${c}" stroke-width="0.8"/>
-        ${boltPair(fluePipeCX, 2.5, 12, 1)}
+        <rect x="${fluePipeCX-10}" y="${flueTopY}" width="20" height="5" fill="#1a1835" stroke="${c}" stroke-width="0.8"/>
+        ${boltPair(fluePipeCX, flueTopY+2.5, 12, 1)}
         <!-- 进料管（水平延伸到左边缘，右端加喇叭口焊接到烟室壁） -->
         <rect x="0" y="${inletPipeY}" width="${inletPipeEndX}" height="${inletPipeH}" fill="#151330" stroke="${c}" stroke-width="0.9"/>
         <rect x="2" y="${inletPipeY+2}" width="${inletPipeEndX-4}" height="2" fill="rgba(255,255,255,0.06)"/>
@@ -2085,12 +1777,12 @@ const TEMPLATES = {
         <circle cx="${h_gearX+54}" cy="${h_cy+h_R+17.5}" r="0.8" fill="${c}" opacity="0.5"/>`;
 
       return `
-        ${drumShade}${clipDef}${clipDefInner}
+        ${drumShade}${tempGrad}${clipDef}${clipDefInner}
         ${foundations}
         ${tailHood}${flueParticles}
         ${trunnions}${h_thrustWheel}
         ${burnerCar}
-        ${heatGlow}${drumBody}${weldRings}${tires}${h_girthGear}
+        ${heatGlow}${drumBody}${tempOverlay}${weldRings}${tires}${h_girthGear}
         ${refractory}${flights}${materialParticles}${flames}
         ${rotMarks}${ringBolts}
         ${h_driveSystem}
@@ -2431,11 +2123,12 @@ const TEMPLATES = {
     defaultSize: { w: 200, h: 90 },
     ports: [{id:'inlet',x:0.3,y:0,dir:'up'},{id:'outlet',x:1,y:0.75,dir:'right'},{id:'left',x:0,y:.5,dir:'left'},{id:'right',x:1,y:.5,dir:'right'}],
     render: (w,h,p)=>{
-      const endW = 22;
-      const bodyX = endW+4;
-      const bodyW = w-endW*2-8;
-      const bodyH = h*0.32;
-      const bodyY = h*0.38;
+      // 端板/槽体几何：两端端板与槽体法兰同高（统一高度带），避免两头宽中间窄
+      const endW = 24;
+      const bodyX = endW+3;
+      const bodyW = w-endW*2-6;
+      const bodyH = h*0.38;
+      const bodyY = h*0.35;
       const cy = bodyY+bodyH/2;
       const boltsTop=[], boltsBot=[];
       const boltCount=Math.max(3,Math.floor(bodyW/22));
@@ -2466,22 +2159,57 @@ const TEMPLATES = {
         const toX = reversed ? (bodyX+6) : (bodyX+bodyW-6);
         particles+=`<circle r="2.2" fill="${p.color}" opacity="0"><animate attributeName="cx" from="${fromX}" to="${toX}" dur="3s" begin="-${delay}s" repeatCount="indefinite"/><animate attributeName="cy" values="${(cy-bodyH*0.18).toFixed(1)};${(cy+bodyH*0.18).toFixed(1)};${(cy-bodyH*0.18).toFixed(1)}" keyTimes="0;0.5;1" dur="0.8s" begin="-${delay}s" repeatCount="indefinite"/><animate attributeName="opacity" values="0;0.9;0.9;0" keyTimes="0;0.12;0.88;1" dur="3s" begin="-${delay}s" repeatCount="indefinite"/></circle>`;
       }
-      const sr=6;
-      const s1x=w-endW/2-2, s1y=bodyY-10;
-      const s2x=w-endW/2-2, s2y=bodyY+bodyH+sr+6;
-      const chainP=`M ${s1x+sr} ${s1y} L ${s1x+sr+8} ${s1y} L ${s2x+sr+8} ${s2y} L ${s2x+sr} ${s2y} A ${sr} ${sr} 0 0 1 ${s2x-sr} ${s2y} L ${s2x-sr-8} ${s2y} L ${s1x-sr-8} ${s1y} L ${s1x-sr} ${s1y} A ${sr} ${sr} 0 0 1 ${s1x+sr} ${s1y} Z`;
+      // 左端板（尾部）：法兰带 + 法兰螺栓 + 加强筋 + 尾轴承座
+      const bossR = Math.max(3, Math.min(6.5, bodyH*0.19));
+      const bossX = endW*0.42;
+      const leftPlate = `
+      <rect x="0" y="${bodyY-3}" width="${endW}" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
+      <rect x="0" y="${bodyY+bodyH}" width="${endW}" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
+      <rect x="0" y="${bodyY}" width="${endW}" height="${bodyH}" rx="2" fill="#1c1b40" stroke="${p.color}" stroke-width="1.5"/>
+      <rect x="${endW-4}" y="${bodyY-2}" width="4" height="${bodyH+4}" fill="#161534" stroke="${p.color}" stroke-width="1"/>
+      <line x1="5" y1="${bodyY+5}" x2="${endW-8}" y2="${bodyY+5}" stroke="${p.color}" stroke-width="0.6" opacity="0.35"/>
+      <line x1="5" y1="${bodyY+bodyH-5}" x2="${endW-8}" y2="${bodyY+bodyH-5}" stroke="${p.color}" stroke-width="0.6" opacity="0.35"/>
+      <circle cx="4.5" cy="${bodyY-3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${endW-7}" cy="${bodyY-3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="4.5" cy="${bodyY+bodyH+3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${endW-7}" cy="${bodyY+bodyH+3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${bossX.toFixed(1)}" cy="${cy}" r="${bossR.toFixed(1)}" fill="#161534" stroke="${p.color}" stroke-width="1.3"/>
+      <circle cx="${bossX.toFixed(1)}" cy="${cy}" r="1.6" fill="${p.color}" opacity="0.85"/>
+      <circle cx="${(bossX-bossR-2.2).toFixed(1)}" cy="${cy}" r="1" fill="none" stroke="${p.color}" stroke-width="0.7" opacity="0.7"/>
+      <circle cx="${(bossX+bossR+2.2).toFixed(1)}" cy="${cy}" r="1" fill="none" stroke="${p.color}" stroke-width="0.7" opacity="0.7"/>`;
+      // 右端板（驱动端）：链传动整体收进端板高度内（双链轮 + 环链 + 旋转辐条）
+      const spR = Math.max(3, Math.min(6, bodyH*0.18));
+      const spX = w-endW/2;
+      const sp1y = bodyY+bodyH*0.28, sp2y = bodyY+bodyH*0.72;
+      const chainP=`M ${spX+spR} ${sp1y.toFixed(1)} L ${spX+spR} ${sp2y.toFixed(1)} A ${spR.toFixed(1)} ${spR.toFixed(1)} 0 0 1 ${spX-spR} ${sp2y.toFixed(1)} L ${spX-spR} ${sp1y.toFixed(1)} A ${spR.toFixed(1)} ${spR.toFixed(1)} 0 0 1 ${spX+spR} ${sp1y.toFixed(1)} Z`;
       let st1='', st2='';
-      for(let i=0;i<8;i++){
-        const a1=i*45*Math.PI/180, a2=(i*45+22)*Math.PI/180;
-        st1+=`<line x1="${s1x+Math.cos(a1)*sr}" y1="${s1y+Math.sin(a1)*sr}" x2="${s1x+Math.cos(a1)*(sr+2)}" y2="${s1y+Math.sin(a1)*(sr+2)}" stroke="${p.color}" stroke-width="1.2"/>`;
-        st2+=`<line x1="${s2x+Math.cos(a2)*sr}" y1="${s2y+Math.sin(a2)*sr}" x2="${s2x+Math.cos(a2)*(sr+2)}" y2="${s2y+Math.sin(a2)*(sr+2)}" stroke="${p.color}" stroke-width="1.2"/>`;
+      for(let i=0;i<6;i++){
+        const a1=i*60*Math.PI/180, a2=(i*60+30)*Math.PI/180;
+        st1+=`<line x1="${(spX+Math.cos(a1)*spR*0.35).toFixed(1)}" y1="${(sp1y+Math.sin(a1)*spR*0.35).toFixed(1)}" x2="${(spX+Math.cos(a1)*(spR-1)).toFixed(1)}" y2="${(sp1y+Math.sin(a1)*(spR-1)).toFixed(1)}" stroke="${p.color}" stroke-width="1"/>`;
+        st2+=`<line x1="${(spX+Math.cos(a2)*spR*0.35).toFixed(1)}" y1="${(sp2y+Math.sin(a2)*spR*0.35).toFixed(1)}" x2="${(spX+Math.cos(a2)*(spR-1)).toFixed(1)}" y2="${(sp2y+Math.sin(a2)*(spR-1)).toFixed(1)}" stroke="${p.color}" stroke-width="1"/>`;
       }
+      const rightPlate = `
+      <rect x="${w-endW}" y="${bodyY-3}" width="${endW}" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
+      <rect x="${w-endW}" y="${bodyY+bodyH}" width="${endW}" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
+      <rect x="${w-endW}" y="${bodyY}" width="${endW}" height="${bodyH}" rx="2" fill="#1c1b40" stroke="${p.color}" stroke-width="1.5"/>
+      <rect x="${w-endW}" y="${bodyY-2}" width="4" height="${bodyH+4}" fill="#161534" stroke="${p.color}" stroke-width="1"/>
+      <circle cx="${w-4.5}" cy="${bodyY-3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${w-endW+7}" cy="${bodyY-3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${w-4.5}" cy="${bodyY+bodyH+3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <circle cx="${w-endW+7}" cy="${bodyY+bodyH+3}" r="1.3" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      <path d="${chainP}" fill="none" stroke="${p.color}" stroke-width="1.3" opacity="0.6" stroke-dasharray="3 2"/>
+      <circle cx="${spX}" cy="${sp1y.toFixed(1)}" r="${spR.toFixed(1)}" fill="#161534" stroke="${p.color}" stroke-width="1.4"/>
+      <g>
+        <animateTransform attributeName="transform" type="rotate" from="0 ${spX} ${sp1y.toFixed(1)}" to="360 ${spX} ${sp1y.toFixed(1)}" dur="1.5s" repeatCount="indefinite"/>
+        ${st1}
+      </g>
+      <circle cx="${spX}" cy="${sp2y.toFixed(1)}" r="${spR.toFixed(1)}" fill="#161534" stroke="${p.color}" stroke-width="1.4"/>
+      <g>
+        <animateTransform attributeName="transform" type="rotate" from="360 ${spX} ${sp2y.toFixed(1)}" to="0 ${spX} ${sp2y.toFixed(1)}" dur="1.5s" repeatCount="indefinite"/>
+        ${st2}
+      </g>`;
       return `
-      <rect x="0" y="${bodyY-8}" width="${endW}" height="${bodyH+16}" fill="#1c1b40" stroke="${p.color}" stroke-width="1.5"/>
-      <rect x="${endW-4}" y="${bodyY-6}" width="4" height="${bodyH+12}" fill="#161534" stroke="${p.color}" stroke-width="1"/>
-      <circle cx="4" cy="${bodyY-4}" r="1.5" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
-      <circle cx="4" cy="${bodyY+bodyH+4}" r="1.5" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
-      <circle cx="${endW-6}" cy="${cy}" r="1.5" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
+      ${leftPlate}
       <rect x="${bodyX}" y="${bodyY}" width="${bodyW}" height="${bodyH}" rx="2" fill="url(#gEquip)" stroke="${p.color}" stroke-width="1.5"/>
       <rect x="${bodyX}" y="${bodyY}" width="${bodyW}" height="${bodyH*0.55}" fill="#0f0e22" opacity="0.75" stroke="${p.color}" stroke-width="0.8"/>
       <rect x="${bodyX-2}" y="${bodyY-3}" width="${bodyW+4}" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
@@ -2491,28 +2219,10 @@ const TEMPLATES = {
       <line x1="${bodyX+4}" y1="${cy}" x2="${bodyX+bodyW-4}" y2="${cy}" stroke="${p.color}" stroke-width="1.2" opacity="0.5"/>
       ${blades}
       ${particles}
-      <rect x="${bodyX+bodyW*0.2-10}" y="${bodyY-10}" width="20" height="8" fill="#0a0a1a" stroke="${p.color}" stroke-width="1.2"/>
-      <rect x="${bodyX+bodyW*0.2-14}" y="${bodyY-14}" width="28" height="4" fill="#1c1b40" stroke="${p.color}" stroke-width="1"/>
-      <line x1="${bodyX+bodyW*0.2-12}" y1="${bodyY-2}" x2="${bodyX+bodyW*0.2+12}" y2="${bodyY-2}" stroke="${p.color}" stroke-width="0.8" opacity="0.5" stroke-dasharray="2 2"/>
-      <rect x="${w-endW}" y="${bodyY-18}" width="${endW}" height="${bodyH+36}" fill="#1c1b40" stroke="${p.color}" stroke-width="1.5"/>
-      <rect x="${w-endW}" y="${bodyY-4}" width="${endW}" height="4" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
-      <rect x="${w-endW}" y="${bodyY+bodyH}" width="${endW}" height="4" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
-      <circle cx="${w-endW/2}" cy="${bodyY-2}" r="1.5" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
-      <circle cx="${w-endW/2}" cy="${bodyY+bodyH+2}" r="1.5" fill="none" stroke="${p.color}" stroke-width="0.8" opacity="0.7"/>
-      <path d="${chainP}" fill="none" stroke="${p.color}" stroke-width="1.5" opacity="0.7" stroke-dasharray="3 2"/>
-      <circle cx="${s1x}" cy="${s1y}" r="${sr}" fill="#161534" stroke="${p.color}" stroke-width="1.5"/>
-      <g>
-        <animateTransform attributeName="transform" type="rotate" from="0 ${s1x} ${s1y}" to="360 ${s1x} ${s1y}" dur="1.5s" repeatCount="indefinite"/>
-        ${st1}
-      </g>
-      <circle cx="${s2x}" cy="${s2y}" r="${sr}" fill="#161534" stroke="${p.color}" stroke-width="1.5"/>
-      <g>
-        <animateTransform attributeName="transform" type="rotate" from="360 ${s2x} ${s2y}" to="0 ${s2x} ${s2y}" dur="1.5s" repeatCount="indefinite"/>
-        ${st2}
-      </g>
-      <rect x="${w-endW+2}" y="${s2y+sr+4}" width="${endW-4}" height="12" rx="3" fill="#1c1b40" stroke="${p.color}" stroke-width="1.5"/>
-      <line x1="${w-endW+5}" y1="${s2y+sr+8}" x2="${w-5}" y2="${s2y+sr+8}" stroke="${p.color}" stroke-width="0.8" opacity="0.5" stroke-dasharray="2 2"/>
-      <circle cx="${w-endW/2}" cy="${s2y+sr+10}" r="2.5" fill="none" stroke="${p.color}" stroke-width="1"/>
+      <rect x="${w*0.3-10}" y="${bodyY-10}" width="20" height="8" fill="#0a0a1a" stroke="${p.color}" stroke-width="1.2"/>
+      <rect x="${w*0.3-14}" y="${bodyY-14}" width="28" height="4" fill="#1c1b40" stroke="${p.color}" stroke-width="1"/>
+      <line x1="${w*0.3-12}" y1="${bodyY-2}" x2="${w*0.3+12}" y2="${bodyY-2}" stroke="${p.color}" stroke-width="0.8" opacity="0.5" stroke-dasharray="2 2"/>
+      ${rightPlate}
       <polygon points="${endW+4},${bodyY+bodyH} ${endW+4},${bodyY+bodyH+12} ${endW+12},${bodyY+bodyH+6}" fill="#1c1b40" stroke="${p.color}" stroke-width="1.2"/>
       <rect x="${endW+2}" y="${bodyY+bodyH+12}" width="10" height="3" fill="#161534" stroke="${p.color}" stroke-width="0.8"/>
       `
@@ -2798,6 +2508,118 @@ const TEMPLATES = {
     ports: [],
     render: (w,h,p)=>`<rect x="0" y="0" width="${w}" height="${h}" rx="3" fill="#12112B99" stroke="${p.color}" stroke-width="1" stroke-dasharray="4 3"/><text x="${w/2}" y="${h/2+5}" text-anchor="middle" fill="${p.color}" font-size="15" font-weight="600" font-family="inherit">${esc(p.name||'文本')}</text>`
   },
+  monitor: {
+    name: '监控器', category: '监控',
+    defaultSize: { w: 150, h: 21 },
+    ports: [],
+    render: (w,h,p)=>{
+      const c = p.color || '#00E5FF';
+      const tags = Array.isArray(p.monitorTags) ? p.monitorTags : [];
+      const ROW = 17;
+      let body = '';
+      if(!tags.length){
+        body = `<text x="${w/2}" y="12" text-anchor="middle" fill="#5a608a" font-size="8.5" font-family="inherit">未绑定测点</text>`;
+      } else {
+        // 不展示名称，仅居中展示数值+单位符号（详细信息走悬浮面板/详情抽屉）
+        tags.forEach((t,i)=>{
+          const y = 12 + i*ROW;
+          body += `
+      <text x="${w/2}" y="${y}" text-anchor="middle" font-family="inherit"><tspan class="mon-value" data-i="${i}" fill="${c}" font-size="11" font-weight="700" style="font-variant-numeric:tabular-nums">--</tspan><tspan class="mon-unit" data-i="${i}" fill="#8a90c4" font-size="7.5"> </tspan></text>`;
+        });
+      }
+      return `
+      <rect x="0" y="0" width="${w}" height="${h}" rx="6" class="mon-panel" fill="#0c0f24f2" stroke="${c}" stroke-width="1.2"/>
+      ${body}
+    `;
+    }
+  },
+};
+</script><script>/* ============================================================
+ * PFD Editor · 工艺流程组态编辑器 · 应用逻辑（editor.js）
+ * 全可编辑 · 拖拽搭建 · 端口连线 · 运行动画
+ *
+ * 运行环境：
+ *   - 本文件与 templates.js（组件模板库）配套，加载顺序固定为
+ *     templates.js → editor.js（editor.html / preview.html 均如此）；
+ *   - 同时服务于两个页面：editor.html（编辑器）与 preview.html（只读预览，
+ *     预览页另有本地 IIFE 覆盖部分行为，如 applySMILState）；
+ *   - 由页面底部的 document.write 以 ?v= 时间戳加载以绕过缓存。
+ *
+ * 目录（对应下文 "N." 注释块）：
+ *   0  后端传感器 API            15 实时数据：回转窑温度渐变
+ *   1  状态管理                  16 操作：删除/复制/对齐/历史
+ *   2  渲染：全量渲染            17 模式
+ *   3  渲染：监控器组件          18 状态栏
+ *   4  渲染：增量更新            19 工具栏（仅编辑页）
+ *   5  渲染：覆盖层              20 键盘快捷键
+ *   6  坐标转换                  21 项目保存/加载
+ *   7  组件库面板                22 模态框
+ *   8  拖拽：从组件库到画布      23 轻提示（flash）
+ *   9  画布交互                  24 运行模式：粒子流动
+ *   10 管道                      25 导出：PNG
+ *   11 属性面板                  26 导出：自包含单文件 HTML
+ *   12 属性面板：运行参数(Tag)   27 默认模板：还原工艺
+ *   13 实时数据：基础设施        28 初始化（仅编辑页）
+ *   14 实时数据：监控器面板
+ * ============================================================ */
+'use strict';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const $ = id => document.getElementById(id);
+// DOM references - null on preview page
+const svg = $('canvas');
+const layerPipes = $('layerPipes');
+const layerEquip = $('layerEquip');
+const layerTop = $('layerTop');
+const layerFlow = $('layerFlow');
+const layerOverlay = $('layerOverlay');
+const _isEditor = !!$('btnSave'); // true when running on editor page (has toolbar buttons)
+
+/* ============================================================
+ * 0. 后端传感器 API（编辑器与预览页共用）
+ *    - 通过 http(s):// 访问时使用相对路径 /api/*，由当前服务器代理转发（避免CORS问题）；
+ *    - file:// 协议下直连远端地址（需后端支持CORS，否则会失败）；
+ *    - 可通过 URL 参数 ?api= 覆盖（如 editor.html?api=https://xx.xx），便于切换环境。
+ * ============================================================ */
+const _apiParam = new URLSearchParams(location.search).get('api');
+const _isFileProtocol = location.protocol === 'file:';
+const SENSOR_API_BASE = _apiParam || (_isFileProtocol ? 'http://192.168.1.78' : '');
+const SENSOR_API = {
+  async _get(path){
+    const ctrl = typeof AbortController!=='undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(()=>ctrl.abort(), 5000) : null;
+    try{
+      const r = await fetch(SENSOR_API_BASE + path, ctrl?{signal:ctrl.signal}:{});
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json().catch(()=>null);
+      return j && j.success ? j : null;
+    }finally{
+      if(timer) clearTimeout(timer);
+    }
+  },
+  // 传感器目录: [{sensor_tag, type, kiln_id}]
+  list(){ return this._get('/api/sensors/list'); },
+  // 实时数值: 可按 sensor_tag / type / kiln_id / limit 过滤
+  values(q={}){
+    const p = new URLSearchParams();
+    if(q.sensor_tag) p.set('sensor_tag', q.sensor_tag);
+    if(q.type) p.set('type', q.type);
+    if(q.kiln_id) p.set('kiln_id', q.kiln_id);
+    if(q.limit) p.set('limit', q.limit);
+    const qs = p.toString();
+    return this._get('/api/sensors/values' + (qs?'?'+qs:''));
+  },
+  // 历史数据: 按 sensor_tag 查询，支持 time_range(10m/30m/1h/6h/12h/24h) 或 start/end
+  history(q={}){
+    const p = new URLSearchParams();
+    if(q.sensor_tag) p.set('sensor_tag', q.sensor_tag);
+    if(q.time_range) p.set('time_range', q.time_range);
+    if(q.start) p.set('start', q.start);
+    if(q.end) p.set('end', q.end);
+    if(q.limit) p.set('limit', q.limit);
+    const qs = p.toString();
+    return this._get('/api/sensors/history' + (qs?'?'+qs:''));
+  }
 };
 
 /* 管道类型 */
@@ -2811,7 +2633,7 @@ const PIPE_TYPES = {
 };
 
 /* ============================================================
- * 2. 状态管理
+ * 1. 状态管理
  * ============================================================ */
 var doc = { version: 1, components: [], pipes: [], meta: { title:'未命名流程', bg:'#070612' } };
 var compMap = new Map();  // id -> component，O(1)查找缓存
@@ -2859,12 +2681,77 @@ function selToggle(kind, id){
 function selClear(){ selection = []; }
 function selComps(){ return selection.filter(s=>s.kind==='component').map(s=>getComp(s.id)).filter(Boolean); }
 
+/* 选中态/端口高亮：仅同步 DOM class，避免为纯选择变化触发全量 renderAll 重建 */
+// 选中虚线框：由 applySelectionClasses 动态维护（renderAll 渲染时也复用此构造）
+function makeSelBox(comp){
+  const sel = createSVG('rect');
+  sel.setAttribute('class','sel-box');
+  sel.setAttribute('x',-4); sel.setAttribute('y',-4);
+  sel.setAttribute('width',comp.w+8); sel.setAttribute('height',comp.h+8);
+  sel.setAttribute('rx',6); sel.setAttribute('fill','none');
+  sel.setAttribute('stroke','#00E5FF'); sel.setAttribute('stroke-width',1.5);
+  sel.setAttribute('stroke-dasharray','4 3');
+  sel.setAttribute('pointer-events','none');
+  return sel;
+}
+function applySelectionClasses(){
+  [layerEquip, layerTop].forEach(l=>{
+    l.querySelectorAll('.equip-group.selected').forEach(g=>{
+      g.classList.remove('selected');
+      const box = g.querySelector(':scope > .sel-box');
+      if(box) box.remove();
+    });
+  });
+  layerPipes.querySelectorAll('.pipe.pipe-sel').forEach(p=>p.classList.remove('pipe-sel'));
+  selection.forEach(s=>{
+    if(s.kind==='component'){
+      const comp = getComp(s.id);
+      const layer = (comp && comp.type==='monitor') ? layerTop : layerEquip;
+      const g = layer.querySelector(`.equip-group[data-id="${s.id}"]`);
+      if(g){
+        g.classList.add('selected');
+        if(!g.querySelector(':scope > .sel-box')){
+          if(comp){
+            const box = makeSelBox(comp);
+            // 保持原渲染顺序：虚线框在设备体之上、端口之下
+            const firstPort = g.querySelector('.port');
+            if(firstPort) g.insertBefore(box, firstPort); else g.appendChild(box);
+          }
+        }
+      }
+    }else{
+      const g = layerPipes.querySelector(`.pipe-group[data-id="${s.id}"]`);
+      if(g){ const path = g.querySelector('.pipe'); if(path) path.classList.add('pipe-sel'); }
+    }
+  });
+}
+function applyPortActive(){
+  layerEquip.querySelectorAll('.port.active').forEach(c=>c.classList.remove('active'));
+  if(connectState && connectState.from){
+    layerEquip.querySelectorAll(`.port[data-cid="${connectState.from.cid}"][data-port="${connectState.from.port}"]`)
+      .forEach(c=>c.classList.add('active'));
+  }
+}
+
 function uid(p='c'){ return p + Math.random().toString(36).slice(2,8); }
 function snapV(v){ return snap ? Math.round(v/snapGrid)*snapGrid : v; }
 
 /* ============================================================
- * 3. 渲染
+ * 2. 渲染：全量渲染（renderAll）
  * ============================================================ */
+/* SMIL 动画开关：编辑模式暂停所有 SMIL 动画（性能关键，数百个 indefinite 动画会拖垮帧率），运行模式恢复 */
+function applySMILState(){
+  if(!svg || typeof svg.pauseAnimations !== 'function') return;
+  try{ if(running){ svg.unpauseAnimations(); } else { svg.pauseAnimations(); } }catch(err){}
+}
+/* 编辑模式剥离 SMIL 动画元素：暂停的 SMIL 仍占据渲染树（模板含上千个 animate 节点），
+   拖拽改属性时会触发 SVG 大面积重光栅化；编辑态直接不生成动画节点，运行态再注入 */
+function stripSMIL(markup){
+  if(!markup || markup.indexOf('<animate')<0) return markup;
+  return markup
+    .replace(/<animate(?:Transform)?\b[^>]*\/>/g,'')
+    .replace(/<animate(?:Transform)?\b[^>]*>[\s\S]*?<\/animate(?:Transform)?>/g,'');
+}
 function portPos(comp, portId){
   const t = TEMPLATES[comp.type];
   if(!t) return null;
@@ -3005,6 +2892,7 @@ function renderAll(){
   // pipes under equipment
   layerPipes.innerHTML = '';
   layerEquip.innerHTML = '';
+  layerTop.innerHTML = '';
   layerFlow.innerHTML = '';
 
   // pipes
@@ -3076,53 +2964,43 @@ function renderAll(){
     layerPipes.appendChild(g);
   });
 
-  // equipment
+  // equipment（monitor 类型渲染到 layerTop 悬浮层，其余到 layerEquip）
   doc.components.forEach(comp=>{
     const t = TEMPLATES[comp.type]; if(!t) return;
+    const isMonitor = comp.type === 'monitor';
+    const layer = isMonitor ? layerTop : layerEquip;
+    if(isMonitor){
+      normalizeMonitorProps(comp);        // 旧版双 tag 字段迁移
+      comp.h = monitorAutoHeight(comp.props); // 高度随监控项数量自适应
+      renderMonitorLead(comp);            // 归属指向折线（先画，位于面板之下）
+    }
     const g = createSVG('g');
     g.setAttribute('transform', `translate(${comp.x},${comp.y}) rotate(${comp.rotation||0} ${comp.w/2} ${comp.h/2})`);
     g.dataset.id = comp.id;
     g.setAttribute('class','equip-group' + (selHas('component',comp.id) ? ' selected':''));
-    // 裁剪路径，防止图形溢出
-    const clipId = 'clip-' + comp.id;
-    const defs = createSVG('defs');
-    const clip = createSVG('clipPath');
-    clip.setAttribute('id', clipId);
-    const clipRect = createSVG('rect');
-    clipRect.setAttribute('x', -2); clipRect.setAttribute('y', -2);
-    clipRect.setAttribute('width', comp.w+4); clipRect.setAttribute('height', comp.h+4);
-    clipRect.setAttribute('rx', 4);
-    clip.appendChild(clipRect);
-    defs.appendChild(clip);
-    g.appendChild(defs);
-    const bodyWrap = createSVG('g');
-    bodyWrap.setAttribute('clip-path', `url(#${clipId})`);
     // 全局水平镜像：对所有组件统一处理
+    // 注：原 bodyWrap 的 clip-path 为死代码（子节点随后被移出 bodyWrap），已移除以省去每台设备的 defs/clipPath 开销
     const mirrored = comp.props && comp.props.mirrored;
+    const markup = running ? t.render(comp.w, comp.h, comp.props) : stripSMIL(t.render(comp.w, comp.h, comp.props));
     if(mirrored){
       const mirrorG = createSVG('g');
       mirrorG.setAttribute('transform', `translate(${comp.w},0) scale(-1,1)`);
-      mirrorG.innerHTML = t.render(comp.w, comp.h, comp.props);
-      bodyWrap.appendChild(mirrorG);
+      mirrorG.innerHTML = markup;
+      g.appendChild(mirrorG);
     }else{
-      bodyWrap.innerHTML = t.render(comp.w, comp.h, comp.props);
+      const bodyG = createSVG('g');
+      bodyG.innerHTML = markup;
+      g.appendChild(bodyG);
     }
     // selection highlight
     if(selHas('component', comp.id)){
-      const sel = createSVG('rect');
-      sel.setAttribute('x',-4); sel.setAttribute('y',-4);
-      sel.setAttribute('width',comp.w+8); sel.setAttribute('height',comp.h+8);
-      sel.setAttribute('rx',6); sel.setAttribute('fill','none');
-      sel.setAttribute('stroke','#00E5FF'); sel.setAttribute('stroke-width',1.5);
-      sel.setAttribute('stroke-dasharray','4 3');
-      g.appendChild(sel);
+      g.appendChild(makeSelBox(comp));
     }
-    Array.from(bodyWrap.children).forEach(c=>g.appendChild(c));
     // name label + tag: 移出旋转组，保持在组件顶部水平可读
     const cx = comp.x + comp.w/2, cy = comp.y + comp.h/2;
     const r = (comp.rotation||0) * Math.PI / 180;
     const cos = Math.cos(r), sin = Math.sin(r);
-    if(comp.type!=='text'){
+    if(comp.type!=='text' && !isMonitor){
       const lbl = createSVG('text');
       const ldx = 0, ldy = -(comp.h/2 + 6);
       lbl.setAttribute('x', cx + ldx*cos - ldy*sin);
@@ -3130,9 +3008,9 @@ function renderAll(){
       lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('class','tlabel');
       lbl.dataset.cid = comp.id; lbl.dataset.kind = 'name';
       lbl.textContent = comp.props.name || t.name;
-      layerEquip.appendChild(lbl);
+      layer.appendChild(lbl);
     }
-    if(comp.props.tag){
+    if(comp.props.tag && !isMonitor){
       const tg = createSVG('text');
       const tdx = 0, tdy = (comp.h/2 + 14);
       tg.setAttribute('x', cx + tdx*cos - tdy*sin);
@@ -3140,10 +3018,10 @@ function renderAll(){
       tg.setAttribute('text-anchor','middle'); tg.setAttribute('class','ttag');
       tg.dataset.cid = comp.id; tg.dataset.kind = 'tag';
       tg.textContent = comp.props.tag;
-      layerEquip.appendChild(tg);
+      layer.appendChild(tg);
     }
-    // ports
-    t.ports.forEach(pt=>{
+    // ports（monitor 无交互端口）
+    if(!isMonitor) t.ports.forEach(pt=>{
       const px = (mirrored ? (1 - pt.x) : pt.x) * comp.w, py = pt.y*comp.h;
       const c = createSVG('circle');
       c.setAttribute('cx',px); c.setAttribute('cy',py); c.setAttribute('r',4);
@@ -3158,19 +3036,243 @@ function renderAll(){
         g.appendChild(pl);
       }
     });
-    layerEquip.appendChild(g);
+    layer.appendChild(g);
   });
 
   updateStatus();
+  refreshMonitorValues();
+  applySMILState();
   renderOverlay();
+  refreshKilnTemp(sensorValueMap);
 }
 
 /* ============================================================
- * 3a. 增量渲染：拖拽时直接修改DOM属性，避免全量重建
+ * 3. 渲染：监控器组件（悬浮层实时数值面板）
+ *     props.monitorTags: [{tag, label}]  任意多个监控项
+ *     props.lead: { targetType:'point'|'comp'|'port'|'pipe', x,y, cid?, port?, pipeId?, pipeT?, bend? }
+ *                 归属指向折线（面板 → 设备/端口/管道/自由点）
+ * ============================================================ */
+// 面板高度随监控项数量自适应：行数*17 + 上下留白4（空态占位1行，无标题/时间行）
+function monitorAutoHeight(props){
+  const n = (props && Array.isArray(props.monitorTags)) ? props.monitorTags.length : 0;
+  return Math.max(n,1)*17 + 4;
+}
+// 旧版数据迁移：monitorTag/monitorTag2 双字段 → monitorTags 列表（lead 连接线字段保留）
+function normalizeMonitorProps(comp){
+  const p = comp.props || (comp.props = {});
+  if(!Array.isArray(p.monitorTags)){
+    const mt = [];
+    if(p.monitorTag) mt.push({tag:String(p.monitorTag), label:''});
+    if(p.monitorTag2) mt.push({tag:String(p.monitorTag2), label:''});
+    p.monitorTags = mt;
+  }
+  if(p.monitorTag!=null) delete p.monitorTag;
+  if(p.monitorTag2!=null) delete p.monitorTag2;
+}
+// 连接线起点：面板左/右边缘中点（按目标方向自动选边，避免线绕过面板）
+function monitorLeadAnchor(comp, target){
+  const y = comp.y + comp.h/2;
+  if(target && target.x < comp.x + comp.w/2) return {x:comp.x, y};
+  return {x:comp.x+comp.w, y};
+}
+// 连接线终点：根据 lead 目标类型解析世界坐标（无 lead 返回 null，不画线）
+function monitorLeadTarget(comp){
+  const lead = comp.props && comp.props.lead;
+  if(!lead) return null;
+  if(lead.targetType==='comp'){
+    const c = getComp(lead.cid);
+    if(c) return {x:c.x+c.w/2, y:c.y+c.h/2};
+  } else if(lead.targetType==='port'){
+    const c = getComp(lead.cid);
+    if(c){ const p = portPos(c, lead.port); if(p) return {x:p.x, y:p.y}; }
+  } else if(lead.targetType==='pipe'){
+    const p = getPipe(lead.pipeId);
+    if(p && p._pts) return pointAtPolyline(p._pts, lead.pipeT==null?0.5:lead.pipeT);
+  }
+  return {x:lead.x, y:lead.y};
+}
+// 连接线折线点列：锚点 → (可选折点 bend) → 目标
+function monitorLeadPts(comp){
+  const b = monitorLeadTarget(comp);
+  if(!b) return null;
+  const a = monitorLeadAnchor(comp, b);
+  const pts = [{x:a.x, y:a.y}];
+  const bend = comp.props.lead && comp.props.lead.bend;
+  if(bend) pts.push({x:bend.x, y:bend.y});
+  pts.push({x:b.x, y:b.y});
+  return pts;
+}
+// 归属折线全局样式（存 doc.meta，对所有监控器生效）：{ width, opacity }
+function monitorLeadStyle(){
+  const s = doc.meta && doc.meta.monitorLeadStyle;
+  return {
+    width: (s && +s.width > 0) ? +s.width : 1.6,
+    opacity: (s && s.opacity != null && +s.opacity >= 0 && +s.opacity <= 1) ? +s.opacity : 0.85
+  };
+}
+// 渲染归属折线（虚线 + 目标端点圆点），追加到 layerTop
+function renderMonitorLead(comp){
+  const g = createSVG('g');
+  g.setAttribute('class','lead-group');
+  g.dataset.id = comp.id;
+  const pts = monitorLeadPts(comp);
+  if(pts && pts.length>=2){
+    const st = monitorLeadStyle();
+    const path = createSVG('path');
+    path.setAttribute('d', ptsToPath(pts));
+    path.setAttribute('class','lead-path');
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke','#00E5FF');
+    path.setAttribute('stroke-width', st.width);
+    path.setAttribute('stroke-dasharray','5 3');
+    path.setAttribute('opacity', st.opacity);
+    path.setAttribute('pointer-events','none');
+    g.appendChild(path);
+    const end = pts[pts.length-1];
+    const dot = createSVG('circle');
+    dot.setAttribute('class','lead-dot');
+    dot.setAttribute('cx', end.x); dot.setAttribute('cy', end.y);
+    dot.setAttribute('r', 3.5);
+    dot.setAttribute('fill','#00E5FF');
+    dot.setAttribute('stroke','#0a0a1a'); dot.setAttribute('stroke-width','0.8');
+    dot.setAttribute('pointer-events','none');
+    g.appendChild(dot);
+  }
+  layerTop.appendChild(g);
+}
+// 增量更新折线（拖拽端点/移动组件时）
+function updateMonitorLead(comp){
+  const g = layerTop.querySelector(`.lead-group[data-id="${comp.id}"]`);
+  if(!g) return;
+  const pts = monitorLeadPts(comp);
+  const d = (pts && pts.length>=2) ? ptsToPath(pts) : '';
+  const path = g.querySelector('.lead-path');
+  if(path) path.setAttribute('d', d);
+  const end = pts && pts[pts.length-1];
+  const dot = g.querySelector('.lead-dot');
+  if(dot && end){ dot.setAttribute('cx', end.x); dot.setAttribute('cy', end.y); }
+}
+function refreshMonitorLeads(){
+  doc.components.forEach(c=>{ if(c.type==='monitor') updateMonitorLead(c); });
+}
+// 连接线端点智能吸附：端口(12px) > 设备中心(20px) > 管道(15px) > 自由点
+function snapLeadTarget(comp, sp){
+  let best=null, bestD=12;
+  doc.components.forEach(c=>{
+    if(c.id===comp.id || c.type==='monitor') return;
+    const t = TEMPLATES[c.type]; if(!t) return;
+    t.ports.forEach(pt=>{
+      const p = portPos(c, pt.id); if(!p) return;
+      const d = Math.hypot(p.x-sp.x, p.y-sp.y);
+      if(d<bestD){ bestD=d; best={targetType:'port', cid:c.id, port:pt.id}; }
+    });
+  });
+  if(best) return best;
+  bestD=20; best=null;
+  doc.components.forEach(c=>{
+    if(c.id===comp.id || c.type==='monitor') return;
+    const cx=c.x+c.w/2, cy=c.y+c.h/2;
+    const d=Math.hypot(cx-sp.x, cy-sp.y);
+    if(d<bestD){ bestD=d; best={targetType:'comp', cid:c.id}; }
+  });
+  if(best) return best;
+  bestD=15; best=null;
+  doc.pipes.forEach(p=>{
+    if(!p._pts || p._pts.length<2) return;
+    const t = nearestTOnPolyline(p._pts, sp);
+    const q = pointAtPolyline(p._pts, t);
+    const d = Math.hypot(q.x-sp.x, q.y-sp.y);
+    if(d<bestD){ bestD=d; best={targetType:'pipe', pipeId:p.id, pipeT:t}; }
+  });
+  if(best) return best;
+  return {targetType:'point', x:sp.x, y:sp.y};
+}
+// 连接线目标的人类可读描述（用于属性面板）
+function leadTargetDesc(comp){
+  const lead = comp.props && comp.props.lead;
+  if(!lead) return '未设置';
+  if(lead.targetType==='comp'){ const c=getComp(lead.cid); return '设备中心 · '+(c?(c.props.name||c.id):lead.cid); }
+  if(lead.targetType==='port'){ const c=getComp(lead.cid); return '端口 · '+(c?(c.props.name||c.id):lead.cid)+'.'+lead.port; }
+  if(lead.targetType==='pipe') return '管道 · '+lead.pipeId;
+  return '自由点 · ('+Math.round(lead.x)+', '+Math.round(lead.y)+')';
+}
+// 监控器数值格式化：四舍五入保留最多 2 位小数（869.71234 → 869.71，12 → 12）
+function fmtMonVal(v){
+  const n = Number(v);
+  return isNaN(n) ? String(v) : String(Math.round(n*100)/100);
+}
+// 刷新画布上所有监控器的实时数值/单位（每监控项一行）
+function refreshMonitorValues(){
+  if(!layerTop) return;
+  doc.components.forEach(comp=>{
+    if(comp.type!=='monitor') return;
+    const g = layerTop.querySelector(`.equip-group[data-id="${comp.id}"]`);
+    if(!g) return;
+    const tags = (comp.props && comp.props.monitorTags) || [];
+    tags.forEach((t,i)=>{
+      const live = t.tag ? sensorValueMap[t.tag] : null;
+      const valEl = g.querySelector(`.mon-value[data-i="${i}"]`);
+      const unitEl = g.querySelector(`.mon-unit[data-i="${i}"]`);
+      if(valEl) valEl.textContent = (live && live.value!=null && live.value!=='') ? fmtMonVal(live.value) : '--';
+      if(unitEl) unitEl.textContent = (live && live.unit) ? ' '+live.unit : '';
+    });
+  });
+}
+// 属性面板：监控项列表（每行 tag + 自定义标签 + 删除）
+function renderMonitorTagList(comp){
+  const el = $('monTagList'); if(!el) return;
+  const tags = comp.props.monitorTags = comp.props.monitorTags || [];
+  el.innerHTML = '';
+  if(!tags.length){
+    el.innerHTML = '<div class="pr-empty" style="padding:10px;font-size:11px;color:var(--text3)">暂无监控项 · 搜索添加 Tag</div>';
+    return;
+  }
+  tags.forEach((t,i)=>{
+    const row = document.createElement('div'); row.className='param-row';
+    row.innerHTML = `<span class="mon-tag-k" title="${esc(t.tag)}">${esc(t.tag)}</span><input class="pv" value="${esc(t.label||'')}" placeholder="显示标签（默认 Tag）"><button class="pdel" title="删除">×</button>`;
+    row.querySelector('.pv').oninput = e=>{ t.label = e.target.value; renderAll(); setDirty(); };
+    row.querySelector('.pdel').onclick = ()=>{ tags.splice(i,1); pushHistory(); renderMonitorTagList(comp); renderAll(); setDirty(); };
+    el.appendChild(row);
+  });
+}
+// 属性面板：监控项搜索添加框
+function bindMonitorTagSearch(comp){
+  const tq = $('monTagSearch'); if(!tq) return;
+  const suggest = $('monTagSuggest');
+  const renderSuggest = (q)=>{
+    if(!suggest) return;
+    const cand = new Map();
+    sensorCatalog.forEach(x=>cand.set(x.tag, x));
+    if(!sensorCatalog.length) KNOWN_TAGS.forEach(t=>cand.set(t, {}));
+    docTags().forEach(t=>{ if(!cand.has(t)) cand.set(t, {}); });
+    const qq=(q||'').trim().toUpperCase();
+    let list = Array.from(cand.entries()).filter(([t])=> !qq || t.toUpperCase().includes(qq));
+    list = list.slice(0,10);
+    if(!list.length){ suggest.innerHTML=''; return; }
+    suggest.innerHTML = list.map(([t,meta])=>`<div class="ts-item" data-t="${esc(t)}">${esc(t)}${(meta.type||'')?`<span class="ts-type">${esc(meta.type)}</span>`:''}</div>`).join('');
+    suggest.querySelectorAll('.ts-item').forEach(it=>{
+      it.onclick = ()=>{
+        const tags = comp.props.monitorTags = comp.props.monitorTags || [];
+        if(!tags.some(x=>x.tag===it.dataset.t)) tags.push({tag:it.dataset.t, label:''});
+        tq.value='';
+        suggest.innerHTML='';
+        pushHistory();
+        renderMonitorTagList(comp);
+        renderAll(); setDirty();
+      };
+    });
+  };
+  tq.oninput = ()=>renderSuggest(tq.value);
+  tq.onblur = ()=>{ setTimeout(()=>{ if(suggest) suggest.innerHTML=''; },150); };
+}
+
+/* ============================================================
+ * 4. 渲染：增量更新（拖拽时直接修改DOM属性，避免全量重建）
  * ============================================================ */
 // 更新单个组件的transform（位置/旋转）
 function updateCompTransform(comp){
-  const g = layerEquip.querySelector(`.equip-group[data-id="${comp.id}"]`);
+  const layer = comp.type==='monitor' ? layerTop : layerEquip;
+  const g = layer.querySelector(`.equip-group[data-id="${comp.id}"]`);
   if(g) g.setAttribute('transform', `translate(${comp.x},${comp.y}) rotate(${comp.rotation||0} ${comp.w/2} ${comp.h/2})`);
 }
 // 更新组件名称/位号标签位置
@@ -3241,10 +3343,12 @@ function incrementalMove(comps){
     updateCompLabels(c);
   });
   affectedPipes.forEach(p=>updatePipeGeometry(p));
+  refreshMonitorLeads();
 }
 // 增量调整管道折点
 function incrementalBend(pipe){
   updatePipeGeometry(pipe);
+  refreshMonitorLeads();
 }
 // 增量拖动管道标签
 function incrementalLabelDrag(pipe){
@@ -3264,7 +3368,7 @@ function incrementalLabelDrag(pipe){
 function createSVG(tag){ return document.createElementNS(SVG_NS, tag); }
 
 /* ============================================================
- * 3b. 覆盖层：缩放手柄、连线橡皮筋预览、管道折点
+ * 5. 渲染：覆盖层（缩放手柄、连线橡皮筋预览、管道折点）
  * ============================================================ */
 const HANDLES = ['nw','n','ne','e','se','s','sw','w'];
 function handleLocal(h, w, hh){
@@ -3346,6 +3450,19 @@ function renderOverlay(){
       ov.appendChild(c);
     }
   }
+  // 监控器归属折线端点拖拽把手
+  if(_sc && _sc.kind==='component'){
+    const mcomp = getComp(_sc.id);
+    if(mcomp && mcomp.type==='monitor'){
+      const t = monitorLeadTarget(mcomp) || { x: mcomp.x+mcomp.w+60, y: mcomp.y+mcomp.h/2 };
+      const c = createSVG('circle');
+      c.setAttribute('cx', t.x); c.setAttribute('cy', t.y); c.setAttribute('r',6);
+      c.setAttribute('fill','#00E5FF'); c.setAttribute('stroke','#0a0a1a'); c.setAttribute('stroke-width',1.5);
+      c.setAttribute('class','lead-handle'); c.dataset.id = mcomp.id;
+      c.style.cursor='crosshair';
+      ov.appendChild(c);
+    }
+  }
   // 框选矩形
   if(marqueeState){
     const r = createSVG('rect');
@@ -3362,17 +3479,24 @@ function renderOverlay(){
 }
 
 /* ============================================================
- * 4. 坐标转换
+ * 6. 坐标转换
  * ============================================================ */
+// getScreenCTM 求逆开销较高且结果仅在 pan/zoom/resize 时变化，缓存之
+var _ctmInv = null;
+function invalidateCTM(){ _ctmInv = null; }
 function screenToSVG(clientX, clientY){
+  if(!_ctmInv){
+    const m = svg.getScreenCTM();
+    if(!m) return { x:0, y:0 };
+    _ctmInv = m.inverse();
+  }
   const pt = svg.createSVGPoint();
   pt.x = clientX; pt.y = clientY;
-  const m = svg.getScreenCTM().inverse();
-  return pt.matrixTransform(m);
+  return pt.matrixTransform(_ctmInv);
 }
 
 /* ============================================================
- * 5. 组件库面板
+ * 7. 组件库面板
  * ============================================================ */
 function buildPalette(filter=''){
   const list = $('paList'); list.innerHTML = '';
@@ -3398,7 +3522,7 @@ function buildPalette(filter=''){
 }
 
 /* ============================================================
- * 6. 拖拽：从组件库到画布
+ * 8. 拖拽：从组件库到画布
  * ============================================================ */
 let dragGhost = null, dragType = null;
 function startPaletteDrag(e, type){
@@ -3431,9 +3555,24 @@ function onPaletteDragUp(e){
 
 function addComponent(type, x, y){
   const t = TEMPLATES[type];
+  const props = { name: t.name, tag: '', color: '#9C99FF', params: [], showPorts: true };
+  if(type==='monitor'){
+    props.color = '#00E5FF';
+    props.monitorTags = [];   // [{tag, label}] 任意多个监控项
+    props.lead = { targetType:'point', x: x + t.defaultSize.w + 60, y: y + t.defaultSize.h/2 }; // 归属指向折线（默认右侧自由点，可拖拽吸附设备/端口/管道）
+  }
+  if(type==='rotaryKiln'){
+    // 预设 1# 窑 4 个体温点，沿窑体从左到右颜色渐变（可自行修改）
+    props.tempPoints = [
+      { tag:'1#窑体温度TI_206A' },
+      { tag:'1#窑体温度TI_206B' },
+      { tag:'1#窑体温度TI_206E' },
+      { tag:'1#窑体温度TI_206F' }
+    ];
+  }
   const comp = {
     id: uid('c'), type, x, y, w: t.defaultSize.w, h: t.defaultSize.h, rotation:0,
-    props: { name: t.name, tag: '', color: '#9C99FF', params: [], showPorts: true }
+    props
   };
   doc.components.push(comp);
   pushHistory();
@@ -3443,7 +3582,7 @@ function addComponent(type, x, y){
 }
 
 /* ============================================================
- * 7. 画布交互：选中/移动/端口连线/平移
+ * 9. 画布交互：选中/移动/端口连线/平移
  * ============================================================ */
 let connectState = null; // {from:{cid,port}}
 let movingState = null;  // {cid, ox, oy, startCX, startCY}
@@ -3452,16 +3591,20 @@ let resizeState = null;  // {id, handle, sx, sy, ox, oy, ow, oh}
 let bendState = null;    // {id, sx, sy}
 let labelDragState = null; // {id, pts}
 let marqueeState = null; // {sx, sy, ex, ey, additive}
+let leadDragState = null; // {id} 监控器归属折线端点拖拽
 let clipboard = null;    // 复制粘贴
 let cursorPos = {x:0,y:0};
 let spaceDown = false;
 let downPoint = null;
+/* 拖拽/平移期间给 svg 加 dragging 类（CSS 切到 optimizeSpeed 渲染），降低光栅化成本 */
+function setDraggingHint(on){ if(svg) svg.classList.toggle('dragging', !!on); }
 
 if(_isEditor){
 svg.addEventListener('mousedown', e=>{
   if(e.button===1 || (spaceDown && e.button===0)){ // pan
     panningState = { sx:e.clientX, sy:e.clientY, px:panX, py:panY };
     svg.classList.add('panning');
+    setDraggingHint(true);
     return;
   }
   const sp = screenToSVG(e.clientX, e.clientY);
@@ -3475,6 +3618,7 @@ svg.addEventListener('mousedown', e=>{
       const comp = getComp(sc.id);
       if(comp){
         resizeState = {id:sc.id, handle:target.dataset.handle, sx:sp.x, sy:sp.y, ox:comp.x, oy:comp.y, ow:comp.w, oh:comp.h};
+      setDraggingHint(true);
         e.preventDefault();
       }
     }
@@ -3483,12 +3627,21 @@ svg.addEventListener('mousedown', e=>{
   // 管道折点拖拽
   if(target.classList && target.classList.contains('pipe-bend-handle')){
     bendState = {id:target.dataset.id, sx:sp.x, sy:sp.y};
+    setDraggingHint(true);
     e.preventDefault();
     return;
   }
   // 管道标签沿线拖动
   if(target.classList && target.classList.contains('pipe-label-handle')){
     labelDragState = {id:target.dataset.id, pts:null};
+    setDraggingHint(true);
+    e.preventDefault();
+    return;
+  }
+  // 监控器归属折线端点拖拽
+  if(target.classList && target.classList.contains('lead-handle')){
+    leadDragState = {id:target.dataset.id};
+    setDraggingHint(true);
     e.preventDefault();
     return;
   }
@@ -3499,11 +3652,11 @@ svg.addEventListener('mousedown', e=>{
     if(!connectState){
       connectState = { from:{cid, port} };
       setMode('connect');
-      renderAll();
+      applyPortActive(); renderOverlay();
     } else {
       if(connectState.from.cid===cid && connectState.from.port===port){
         // 取消
-        connectState=null; setMode('select'); renderAll();
+        connectState=null; setMode('select'); applyPortActive(); renderOverlay();
       } else {
         // 建立管道
         addPipe(connectState.from, {cid, port});
@@ -3522,7 +3675,8 @@ svg.addEventListener('mousedown', e=>{
     // 组移动：移动所有已选组件
     const comps = selComps();
     movingState = { items: comps.map(c=>({id:c.id, ox:c.x, oy:c.y})), sx: sp.x, sy: sp.y, moved:false };
-    renderAll(); renderProps();
+    setDraggingHint(true);
+    applySelectionClasses(); renderProps();
     return;
   }
   // 选中管道
@@ -3531,14 +3685,14 @@ svg.addEventListener('mousedown', e=>{
     const id = pg.dataset.id;
     if(e.shiftKey){ selToggle('pipe', id); }
     else if(!selHas('pipe', id)){ selOnly('pipe', id); }
-    renderAll(); renderProps();
+    applySelectionClasses(); renderProps();
     return;
   }
   // 空白：取消连线 / 框选
-  if(connectState){ connectState=null; setMode('select'); renderAll(); renderProps(); return; }
+  if(connectState){ connectState=null; setMode('select'); applyPortActive(); renderOverlay(); renderProps(); return; }
   if(!e.shiftKey) selClear();
   marqueeState = { sx:sp.x, sy:sp.y, ex:sp.x, ey:sp.y, additive:e.shiftKey };
-  renderAll(); renderProps();
+  applySelectionClasses(); renderProps();
 });
 
 /* rAF 节流：合并一帧内多次mousemove，避免高频重绘 */
@@ -3595,6 +3749,17 @@ function processMouseMove(e){
     }
     return;
   }
+  if(leadDragState){
+    const comp = getComp(leadDragState.id);
+    if(comp){
+      leadDragState.lastSp = sp;
+      comp.props.lead = Object.assign({}, comp.props.lead, { targetType:'point', x:snapV(sp.x), y:snapV(sp.y) });
+      updateMonitorLead(comp);
+      renderOverlay();
+      setDirty();
+    }
+    return;
+  }
   if(marqueeState){
     marqueeState.ex = sp.x; marqueeState.ey = sp.y;
     renderOverlay();
@@ -3617,11 +3782,25 @@ function processMouseMove(e){
 }
 svg.addEventListener('mousemove', onMouseMove);
 window.addEventListener('mouseup', ()=>{
+  setDraggingHint(false);
   let needFullRender = false;
   if(movingState){ if(movingState.moved){ pushHistory(); needFullRender=true; } movingState=null; }
   if(resizeState){ pushHistory(); needFullRender=true; resizeState=null; }
   if(bendState){ pushHistory(); needFullRender=true; bendState=null; }
   if(labelDragState){ pushHistory(); needFullRender=true; labelDragState=null; }
+  if(leadDragState){
+    const comp = getComp(leadDragState.id);
+    if(comp && leadDragState.lastSp){
+      // 松手时执行智能吸附（端点位置取最后一次鼠标位置；未实际拖动则保持原目标不变）
+      const snapped = snapLeadTarget(comp, leadDragState.lastSp);
+      const bend = comp.props.lead && comp.props.lead.bend;
+      comp.props.lead = snapped;
+      if(bend) comp.props.lead.bend = bend;
+      pushHistory();
+      needFullRender = true;
+    }
+    leadDragState=null;
+  }
   if(needFullRender){ renderAll(); renderProps(); }
   if(marqueeState){
     // 选框内的组件加入选择
@@ -3635,7 +3814,7 @@ window.addEventListener('mouseup', ()=>{
         if(cx< x2 && cx+cw>x1 && cy<y2 && cy+ch>y1){ selAdd('component', c.id); }
       });
     }
-    marqueeState=null; renderAll(); renderProps();
+    marqueeState=null; applySelectionClasses(); renderProps();
   }
   if(panningState){ panningState=null; svg.classList.remove('panning'); }
 });
@@ -3674,6 +3853,7 @@ function applyView(){
   // 用 viewBox 实现 pan/zoom：基础 2000x1200
   const bw = 2000/zoom, bh = 1200/zoom;
   vb.x = panX; vb.y = panY; vb.width = bw; vb.height = bh;
+  invalidateCTM();
   $('zoomVal').textContent = Math.round(zoom*100)+'%';
   $('stZoom').textContent = Math.round(zoom*100)+'%';
 }
@@ -3710,7 +3890,7 @@ function toggleMirror(){
 }
 
 /* ============================================================
- * 8. 管道
+ * 10. 管道
  * ============================================================ */
 function addPipe(from, to){
   // 磁吸合线：若已存在连接相同两个端口(方向任意)的管道，合并为一条，不产生重复线
@@ -3742,7 +3922,7 @@ function sameConnection(p, from, to){
 }
 
 /* ============================================================
- * 9. 属性面板
+ * 11. 属性面板
  * ============================================================ */
 // 输入防抖：连续输入时延迟执行，避免每次按键都触发整幅画布重渲染
 function debounce(fn, ms){
@@ -3807,7 +3987,7 @@ function renderProps(){
       <div class="fg">
         <div class="fg-title">基本</div>
         <div class="fg-row"><label>名称</label><input id="pName" value="${esc(comp.props.name||'')}"></div>
-        <div class="fg-row"><label>位号</label><input id="pTag" value="${esc(comp.props.tag||'')}"></div>
+        ${comp.type!=='monitor' ? `<div class="fg-row"><label>位号</label><input id="pTag" value="${esc(comp.props.tag||'')}"></div>` : ''}
         <div class="fg-row"><label>颜色</label><div class="color-row"><input type="color" id="pColor" value="${comp.props.color||'#9C99FF'}"><input id="pColorT" value="${comp.props.color||'#9C99FF'}"></div></div>
       </div>
       <div class="fg">
@@ -3815,7 +3995,7 @@ function renderProps(){
         <div class="fg-row"><label>X</label><input type="number" id="pX" value="${Math.round(comp.x)}"></div>
         <div class="fg-row"><label>Y</label><input type="number" id="pY" value="${Math.round(comp.y)}"></div>
         <div class="fg-row"><label>宽</label><input type="number" id="pW" value="${Math.round(comp.w)}"></div>
-        <div class="fg-row"><label>高</label><input type="number" id="pH" value="${Math.round(comp.h)}"></div>
+        ${comp.type!=='monitor' ? `<div class="fg-row"><label>高</label><input type="number" id="pH" value="${Math.round(comp.h)}"></div>` : `<div class="fg-row"><label>高</label><input value="随监控项数量自动" readonly></div>`}
         <div class="fg-row"><label>旋转°</label><div class="rot-row"><input type="number" id="pRot" value="${comp.rotation||0}"><button class="mini-btn" id="pRotL" title="左旋 90°">↺</button><button class="mini-btn" id="pRotR" title="右旋 90°">↻</button></div></div>
         <div class="fg-row"><label>镜像</label><div class="btn-group" id="mirrorGroup"><button class="pr-btn s-btn ${!comp.props.mirrored?'active':''}" data-m="0">正常 →</button><button class="pr-btn s-btn ${comp.props.mirrored?'active':''}" data-m="1">镜像 ←</button></div></div>
       </div>
@@ -3831,6 +4011,33 @@ function renderProps(){
         </div>
       </div>
       ` : ''}
+      ${comp.type==='rotaryKiln' ? `
+      <div class="fg">
+        <div class="fg-title">窑体测温点（左→右颜色渐变）</div>
+        <div class="kiln-temps" id="kilnTempList"></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">4 个测温点对应窑体从左到右的颜色锚点，温度越高颜色越暖（暗红→橙→红→白热，全程无冷色）。填完整位号，如「1#窑体温度TI_206A」。</div>
+      </div>
+      ` : ''}
+      ${comp.type==='monitor' ? `
+      <div class="fg">
+        <div class="fg-title">监控项（画布实时数值）</div>
+        <div class="tag-search">
+          <span class="ts-icon">⌕</span>
+          <input id="monTagSearch" placeholder="搜索 / 添加监控 Tag…">
+          <div class="tag-suggest" id="monTagSuggest"></div>
+        </div>
+        <div class="params-list" id="monTagList"></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">每个监控项在面板上占一行（标签 + 实时值 + 单位），底部显示数据更新时间；高度随监控项数量自动调整。</div>
+      </div>
+      <div class="fg">
+        <div class="fg-title">归属指向折线</div>
+        <div class="fg-row"><label>当前目标</label><input id="monLeadDesc" value="${esc(leadTargetDesc(comp))}" readonly></div>
+        <div class="fg-row"><label>中间折点</label><div class="btn-group"><button class="pr-btn" id="btnClearBend">清除折点</button></div></div>
+        <div class="fg-row"><label>线宽</label><input type="number" id="monLeadWidth" value="${monitorLeadStyle().width}" min="0.5" max="6" step="0.1" title="全局：所有监控器折线"></div>
+        <div class="fg-row"><label>透明度</label><input type="number" id="monLeadOpacity" value="${monitorLeadStyle().opacity}" min="0" max="1" step="0.05" title="全局：所有监控器折线"></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.6;margin-top:4px">选中监控器后，拖动画布上的圆形把手改变指向目标；靠近设备 / 端口 / 管道时自动吸附。线宽 / 透明度对所有监控器全局生效。</div>
+      </div>
+      ` : `
       <div class="fg">
         <div class="fg-title">运行参数 (Tag)</div>
         <div class="tag-search">
@@ -3841,6 +4048,8 @@ function renderProps(){
         <div class="params-list" id="paramsList"></div>
         <button class="pr-btn" id="btnAddParam">+ 添加 Tag</button>
       </div>
+      `}
+      ${comp.type!=='monitor' ? `
       <div class="fg">
         <div class="fg-title">端口</div>
         <div class="ports-list">
@@ -3851,6 +4060,7 @@ function renderProps(){
         </div>
         <div class="fg-row" style="margin-top:6px"><label>显示端口</label><input type="checkbox" id="pShowPorts" ${comp.props.showPorts!==false?'checked':''}></div>
       </div>
+      ` : ''}
       <div class="pr-actions">
         <button class="dup" id="btnDup">复制</button>
         <button class="del" id="btnDelComp">删除</button>
@@ -3859,26 +4069,51 @@ function renderProps(){
     // bind（名称/位号/颜色为 oninput 连续输入，重渲染用防抖；几何用 onchange，失焦/回车才触发，无需防抖）
     const debouncedRenderAll = debounce(()=>{ renderAll(); setDirty(); }, 150);
     $('pName').oninput = e=>{ comp.props.name=e.target.value; head_t.textContent=e.target.value||t.name; debouncedRenderAll(); };
-    $('pTag').oninput = e=>{ comp.props.tag=e.target.value; debouncedRenderAll(); };
+    if($('pTag')) $('pTag').oninput = e=>{ comp.props.tag=e.target.value; debouncedRenderAll(); };
     $('pColor').oninput = e=>{ comp.props.color=e.target.value; $('pColorT').value=e.target.value; debouncedRenderAll(); };
     $('pColorT').onchange = e=>{ comp.props.color=e.target.value; $('pColor').value=e.target.value; renderAll(); setDirty(); };
     $('pX').onchange = e=>{ comp.x=snapV(+e.target.value); pushHistory(); renderAll(); setDirty(); };
     $('pY').onchange = e=>{ comp.y=snapV(+e.target.value); pushHistory(); renderAll(); setDirty(); };
     $('pW').onchange = e=>{ comp.w=Math.max(20,+e.target.value); pushHistory(); renderAll(); setDirty(); };
-    $('pH').onchange = e=>{ comp.h=Math.max(20,+e.target.value); pushHistory(); renderAll(); setDirty(); };
+    if($('pH')) $('pH').onchange = e=>{ comp.h=Math.max(20,+e.target.value); pushHistory(); renderAll(); setDirty(); };
     $('pRot').onchange = e=>{ comp.rotation=+e.target.value; pushHistory(); renderAll(); setDirty(); };
     if($('pRotL')) $('pRotL').onclick = ()=>{ rotateCCW(); renderProps(); };
     if($('pRotR')) $('pRotR').onclick = ()=>{ rotateCW(); renderProps(); };
-    $('pShowPorts').onchange = e=>{ comp.props.showPorts=e.target.checked; renderAll(); setDirty(); };
+    if($('pShowPorts')) $('pShowPorts').onchange = e=>{ comp.props.showPorts=e.target.checked; renderAll(); setDirty(); };
     // 切换阀控制
     const sg = $('switchValveGroup');
     if(sg){ sg.querySelectorAll('.s-btn').forEach(b=>{ b.onclick=()=>{ comp.props.switchValve=+b.dataset.val; renderAll(); renderProps(); setDirty(); }; }); }
+    // 回转窑测温点配置
+    if(comp.type==='rotaryKiln') renderKilnTempList(comp);
     // 通用水平镜像控制
     const mg = $('mirrorGroup');
     if(mg){ mg.querySelectorAll('.s-btn').forEach(b=>{ b.onclick=()=>{ comp.props.mirrored=+b.dataset.m===1; pushHistory(); renderAll(); renderProps(); setDirty(); }; }); }
-    renderParamsList(comp);
-    bindTagSearch(comp);
-    $('btnAddParam').onclick = ()=>{ comp.props.params.push({k:nextNewTag(comp),v:'0',u:''}); pushHistory(); tagFilter=''; renderParamsList(comp); renderAll(); setDirty(); };
+    if(comp.type==='monitor'){
+      // 监控器：多监控项列表 + 搜索添加 + 归属折线管理
+      normalizeMonitorProps(comp);
+      comp.h = monitorAutoHeight(comp.props);
+      bindMonitorTagSearch(comp);
+      renderMonitorTagList(comp);
+      if($('btnClearBend')) $('btnClearBend').onclick = ()=>{ if(comp.props.lead){ delete comp.props.lead.bend; } pushHistory(); renderAll(); setDirty(); };
+      // 折线全局样式（线宽/透明度）：写入 doc.meta，对所有监控器生效
+      const bindLeadStyle = (inputId, key)=>{
+        const el2 = $(inputId); if(!el2) return;
+        el2.onchange = ()=>{
+          if(!doc.meta) doc.meta = {};
+          const s = doc.meta.monitorLeadStyle = doc.meta.monitorLeadStyle || {};
+          const v = +el2.value;
+          if(isNaN(v)) return;
+          s[key] = (key==='width') ? Math.min(6, Math.max(0.5, v)) : Math.min(1, Math.max(0, v));
+          pushHistory(); renderAll(); setDirty();
+        };
+      };
+      bindLeadStyle('monLeadWidth','width');
+      bindLeadStyle('monLeadOpacity','opacity');
+    }else{
+      renderParamsList(comp);
+      bindTagSearch(comp);
+      $('btnAddParam').onclick = ()=>{ comp.props.params.push({k:nextNewTag(comp),v:'0',u:''}); pushHistory(); tagFilter=''; renderParamsList(comp); renderAll(); setDirty(); };
+    }
     $('btnDup').onclick = duplicateComp;
     $('btnDelComp').onclick = deleteSelected;
   } else if(sel.kind==='pipe'){
@@ -3914,7 +4149,7 @@ function renderProps(){
   }
 }
 /* ============================================================
- * 运行参数 —— 基于 tag 的管理模式
+ * 12. 属性面板：运行参数（Tag）管理模式
  *   新增 / 修改 / 删除 / 排序(上下移) / 搜索筛选 / 检索添加
  * ============================================================ */
 const KNOWN_TAGS = ['TI206A','TI206B','TI206E','TI806E','PI206','PI806','LI201','LI202',
@@ -3926,6 +4161,18 @@ let tagFilter = '';   // 搜索筛选关键字
 // —— 后端传感器目录 / 实时值缓存（tag 检索添加与实时数值用）——
 let sensorCatalog = [];   // [{tag, type, kiln_id}]
 let sensorValueMap = {};  // tag -> {value, unit, reported_at}
+
+/* ============================================================
+ * 13. 实时数据：基础设施（目录与实时值缓存，监控器/窑温共用）
+ *   - sensorCatalog: 后端传感器目录（tag 检索候选）
+ *   - sensorValueMap: tag -> {value, unit, reported_at} 实时值缓存
+ * ============================================================ */
+
+// 定位组件 DOM 组：editor 端挂 data-id，preview 端挂 data-cid
+function findCompGroupDom(compId){
+  return document.querySelector('.equip-group[data-id="'+compId+'"]')
+      || document.querySelector('.equip-group[data-cid="'+compId+'"]');
+}
 
 // 拉取后端传感器目录，作为 tag 检索添加的候选
 async function loadSensorCatalog(){
@@ -3954,6 +4201,8 @@ async function refreshSensorValues(){
       const m = {};
       j.data.forEach(d=>{ if(d && d.sensor_tag) m[d.sensor_tag] = { value:d.value, unit:d.unit, reported_at:d.reported_at }; });
       sensorValueMap = m;
+      refreshMonitorValues();
+      refreshKilnTemp(sensorValueMap);
     }
   }catch(e){ /* 静默 */ }
 }
@@ -3987,7 +4236,7 @@ function startTagLiveUpdate(){
 }
 
 /* ============================================================
- * 监控器面板：浏览后端全部传感器，支持搜索/分类/刷新/添加
+ * 14. 实时数据：监控器面板（后端传感器浏览）
  * ============================================================ */
 let _smFilter = '', _smCat = '', _smSelTag = null;
 
@@ -4185,8 +4434,78 @@ function renderPropsLive(){
   set('pW', Math.round(comp.w)); set('pH', Math.round(comp.h));
 }
 
+// 回转窑属性面板：窑体测温点（tag → 颜色锚点）配置列表
+function renderKilnTempList(comp){
+  const el = $('kilnTempList'); if(!el) return;
+  el.innerHTML = '';
+  const pts = comp.props.tempPoints = comp.props.tempPoints || [];
+  while(pts.length < 4) pts.push({ tag:'' });
+  const dots = ['#8c180e','#ce420c','#ff7f00','#ff2200']; // 色标锚点示例（低温→高温采样）
+  const debounced = debounce(()=>{ renderAll(); setDirty(); }, 200);
+  pts.forEach((pt, i)=>{
+    const row = document.createElement('div');
+    row.className = 'ktemp-row';
+    row.innerHTML = `<span class="ktemp-dot" style="background:${dots[i]||'#9C99FF'}"></span><input class="ktag" placeholder="测温点 ${i+1} 位号" value="${esc(pt.tag||'')}">`;
+    row.querySelector('.ktag').oninput = e=>{ pt.tag = e.target.value; debounced(); };
+    el.appendChild(row);
+  });
+}
+
 /* ============================================================
- * 10. 操作：删除/复制/对齐/历史
+ * 15. 实时数据：回转窑温度渐变（组件定制联动）
+ *   - comp.props.tempPoints: [{tag:'1#窑体温度TI_206A'}, ...]（最多 4 个）
+ *   - 温度 → 热力图色标（全程暖色：暗红→红橙→金黄→红→白热）
+ * ============================================================ */
+const KILN_TEMP_STOPS = [
+  // 全程暖色：低温段为暗红→红橙，不再用蓝/青/绿冷色（190~330℃ 属预热段，远非冷态）
+  [0,   [70,12,10]],
+  [200, [140,24,14]],
+  [400, [206,66,12]],
+  [550, [240,138,0]],
+  [700, [255,215,0]],
+  [820, [255,127,0]],
+  [920, [255,34,0]],
+  [1000,[255,221,221]]
+];
+function kilnTempRgb(arr){ return 'rgb('+arr[0]+','+arr[1]+','+arr[2]+')'; }
+function kilnTempColor(t){
+  if(t==null || isNaN(t)) return null;
+  const s = KILN_TEMP_STOPS;
+  if(t <= s[0][0]) return kilnTempRgb(s[0][1]);
+  for(let i=0;i<s.length-1;i++){
+    const t0=s[i][0], c0=s[i][1], t1=s[i+1][0], c1=s[i+1][1];
+    if(t <= t1){
+      const f=(t-t0)/(t1-t0);
+      return kilnTempRgb(c0.map((v,j)=>Math.round(v+(c1[j]-v)*f)));
+    }
+  }
+  return kilnTempRgb(s[s.length-1][1]);
+}
+// 增量更新回转窑温度渐变（不触发 renderAll，避免 SMIL 重置）
+// docArg：预览页在 IIFE 内用局部 doc 遮蔽了全局 doc，需显式传入当前文档；编辑器省略则回退全局 doc
+function refreshKilnTemp(liveMap, docArg){
+  const d = docArg || doc;
+  if(!liveMap || !d || !Array.isArray(d.components)) return;
+  d.components.forEach(comp=>{
+    if(comp.type !== 'rotaryKiln') return;
+    const pts = comp.props && comp.props.tempPoints;
+    if(!pts || !pts.length) return;
+    const g = findCompGroupDom(comp.id);
+    if(!g) return;
+    const stops = g.querySelectorAll('.kiln-temp-stop');
+    pts.forEach((pt, i)=>{
+      const stop = stops[i];
+      if(!stop) return;
+      const live = liveMap[pt.tag];
+      const v = live ? Number(live.value) : NaN;
+      const color = kilnTempColor(v);
+      if(color) stop.setAttribute('stop-color', color);
+    });
+  });
+}
+
+/* ============================================================
+ * 16. 操作：删除/复制/对齐/历史
  * ============================================================ */
 function deleteSelected(){
   if(selection.length===0) return;
@@ -4250,7 +4569,7 @@ function setDirty(d=true){
 }
 
 /* ============================================================
- * 11. 模式
+ * 17. 模式
  * ============================================================ */
 function setMode(m){
   mode = m;
@@ -4262,7 +4581,7 @@ function setMode(m){
 }
 
 /* ============================================================
- * 12. 状态栏
+ * 18. 状态栏
  * ============================================================ */
 function updateStatus(){
   $('stCount').textContent = doc.components.length;
@@ -4276,7 +4595,7 @@ function updateStatus(){
 }
 
 /* ============================================================
- * 13. 工具栏（仅编辑页面）
+ * 19. 工具栏（仅编辑页面）
  * ============================================================ */
 if(_isEditor){
 $('btnTemplate').onclick = ()=>{ loadTemplate(); };
@@ -4288,7 +4607,7 @@ $('btnPNG').onclick = exportPNG;
 $('btnUndo').onclick = undo;
 $('btnRedo').onclick = redo;
 $('btnRun').onclick = ()=>{ running=!running; $('btnRun').classList.toggle('active',running); if(running) startFlow(); else stopFlow(); };
-$('btnPreview').onclick = ()=>{ localStorage.setItem('pfd_doc', JSON.stringify(doc)); setDirty(false); window.open('preview.html', '_blank'); };
+$('btnPreview').onclick = ()=>{ localStorage.setItem('pfd_doc', JSON.stringify(doc, (k,v)=> k.charAt(0)==='_' ? undefined : v)); setDirty(false); window.open('preview.html', '_blank'); };
 $('btnExport').onclick = exportStandalone;
 $('btnSensors').onclick = openSensorPanel;
 $('smClose').onclick = closeSensorPanel;
@@ -4322,7 +4641,7 @@ $('btnSnap').classList.add('active');
 $('paSearch').addEventListener('input', e=>buildPalette(e.target.value));
 
 /* ============================================================
- * 14. 键盘
+ * 20. 键盘快捷键
  * ============================================================ */
 window.addEventListener('keydown', e=>{
   if(e.target.tagName==='INPUT' || e.target.tagName==='TEXTAREA' || e.target.tagName==='SELECT') return;
@@ -4359,7 +4678,7 @@ window.addEventListener('keyup', e=>{ if(e.code==='Space'){ spaceDown=false; svg
 } // _isEditor toolbar+keyboard
 
 /* ============================================================
- * 14b. 项目保存 / 加载
+ * 21. 项目保存 / 加载
  *     支持 File System Access API 保存到用户指定的磁盘位置，
  *     并提供下载/上传回退方案；含错误处理与视觉反馈。
  * ============================================================ */
@@ -4388,6 +4707,8 @@ function isValidProject(obj){
 }
 
 // 组装保存数据（含配置参数与元信息）
+// reviver 过滤运行时缓存字段（_pts/_segs 等下划线开头），避免写入存档
+function stripRuntimeFields(v){ return typeof v==='string' ? JSON.parse(v, (k,val)=> k.charAt(0)==='_' ? undefined : val) : v; }
 function buildProjectData(){
   return {
     type: 'pfd-project',
@@ -4395,8 +4716,8 @@ function buildProjectData(){
     savedAt: new Date().toISOString(),
     title: (doc.meta && doc.meta.title) || '未命名流程',
     meta: Object.assign({}, doc.meta),
-    components: JSON.parse(JSON.stringify(doc.components)),
-    pipes: JSON.parse(JSON.stringify(doc.pipes))
+    components: stripRuntimeFields(JSON.stringify(doc.components)),
+    pipes: stripRuntimeFields(JSON.stringify(doc.pipes))
   };
 }
 
@@ -4563,7 +4884,7 @@ function restoreFromText(text, fileName){
 }
 
 /* ============================================================
- * 15. 模态框
+ * 22. 模态框
  * ============================================================ */
 function openModal(title, text, onOk){
   $('modalTitle').textContent=title;
@@ -4594,7 +4915,7 @@ function confirmDialog(message, onYes){
 }
 
 /* ============================================================
- * 16. 提示
+ * 23. 轻提示（flash）
  * ============================================================ */
 let flashTimer=null;
 function flash(msg){
@@ -4605,13 +4926,16 @@ function flash(msg){
 }
 
 /* ============================================================
- * 17. 运行模式：粒子流动
+ * 24. 运行模式：粒子流动
  * ============================================================ */
 let flowRAF = null;
 let flowNodes = [];   // 粒子节点池：复用于每次动画帧，避免每帧销毁/重建
 const FLOW_TRAIL = 4; // 每个主粒子随影拖尾数（拖尾越长越流畅，节点数 = 粒子数*(1+FLOW_TRAIL)）
 function startFlow(){
   if(flowRAF) return;
+  applySMILState();
+  // 编辑态曾剥离 SMIL 动画元素，运行前重新渲染注入
+  if(svg && !svg.querySelector('animate,animateTransform') && doc.components.length) renderAll();
   function ensureNodes(n){
     // 若上次池中的节点已被重渲染清出 DOM（未连接），整体重建池
     if(flowNodes.length && !flowNodes[0].isConnected){ flowNodes = []; layerFlow.innerHTML=''; }
@@ -4643,7 +4967,7 @@ function startFlow(){
         const base = (t + k/3) % 1;
         for(let j=0;j<n;j++){
           const u = ((base - j*0.018) % 1 + 1) % 1;
-          const p = pointAlong(pipe._pts, u);
+          const p = pointAlongPipe(pipe, u);
           const fade = 1 - j/n;
           const c = flowNodes[idx++];
           c.setAttribute('cx',p.x); c.setAttribute('cy',p.y);
@@ -4682,7 +5006,38 @@ function startFlow(){
   }
   tick();
 }
-function stopFlow(){ if(flowRAF){ cancelAnimationFrame(flowRAF); flowRAF=null; } layerFlow.innerHTML=''; flowNodes.length=0; }
+function stopFlow(){
+  if(flowRAF){ cancelAnimationFrame(flowRAF); flowRAF=null; }
+  layerFlow.innerHTML=''; flowNodes.length=0;
+  // 停止后回到编辑态：剥离 SMIL 动画元素
+  if(svg && svg.querySelector('animate,animateTransform') && doc.components.length) renderAll();
+  applySMILState();
+}
+// 折线段长缓存：每帧每粒子重算段长表是 O(n·段数) 浪费，改为仅在几何变化时重建
+function pipeSegCache(pipe){
+  const pts = pipe._pts;
+  if(!pts) return null;
+  if(!pipe._segs || pipe._segsFor !== pts){
+    const segs=[]; let total=0;
+    for(let i=1;i<pts.length;i++){ const d=Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y); segs.push(d); total+=d; }
+    pipe._segs = segs; pipe._segsTotal = total; pipe._segsFor = pts;
+  }
+  return pipe;
+}
+function pointAlongPipe(pipe, t){
+  pipeSegCache(pipe);
+  const pts = pipe._pts, segs = pipe._segs, total = pipe._segsTotal;
+  if(!pts || !segs || total<=0) return pts ? pts[pts.length-1] : {x:0,y:0};
+  let dist=t*total, acc=0;
+  for(let i=1;i<pts.length;i++){
+    if(acc+segs[i-1]>=dist){
+      const r = segs[i-1]===0?0:(dist-acc)/segs[i-1];
+      return { x: pts[i-1].x+(pts[i].x-pts[i-1].x)*r, y: pts[i-1].y+(pts[i].y-pts[i-1].y)*r };
+    }
+    acc+=segs[i-1];
+  }
+  return pts[pts.length-1];
+}
 function pointAlong(pts, t){
   // 按长度均匀
   let segs=[], total=0;
@@ -4699,12 +5054,19 @@ function pointAlong(pts, t){
 }
 
 /* ============================================================
- * 17b. 导出 PNG
+ * 25. 导出：PNG
  * ============================================================ */
 function exportPNG(){
   if(doc.components.length===0 && doc.pipes.length===0){ flash('画布为空，无法导出'); return; }
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   doc.components.forEach(c=>{ minX=Math.min(minX,c.x); minY=Math.min(minY,c.y); maxX=Math.max(maxX,c.x+c.w); maxY=Math.max(maxY,c.y+c.h); });
+  // 监控器归属折线端点/折点纳入包围盒
+  doc.components.forEach(c=>{
+    if(c.type!=='monitor') return;
+    const t = monitorLeadTarget(c);
+    if(t){ minX=Math.min(minX,t.x); minY=Math.min(minY,t.y); maxX=Math.max(maxX,t.x); maxY=Math.max(maxY,t.y); }
+    if(c.props.lead && c.props.lead.bend){ const b=c.props.lead.bend; minX=Math.min(minX,b.x); minY=Math.min(minY,b.y); maxX=Math.max(maxX,b.x); maxY=Math.max(maxY,b.y); }
+  });
   doc.pipes.forEach(p=>{ (p._pts||[]).forEach(pt=>{ minX=Math.min(minX,pt.x); minY=Math.min(minY,pt.y); maxX=Math.max(maxX,pt.x); maxY=Math.max(maxY,pt.y); }); });
   const pad=60;
   minX=Math.floor(minX-pad); minY=Math.floor(minY-pad);
@@ -4762,8 +5124,8 @@ function exportPNG(){
 }
 
 /* ============================================================
- * 导出自包含单文件 HTML（供官网直接部署）
- *   把 editor.js 内联 + 当前流程数据 + 嵌入模式(localStorage独立)
+ * 26. 导出：自包含单文件 HTML（供官网直接部署）
+ *   把 templates.js + editor.js 内联 + 当前流程数据 + 嵌入模式(localStorage独立)
  *   打包成一个不依赖服务器的独立 HTML
  * ============================================================ */
 async function exportStandalone(){
@@ -4779,13 +5141,15 @@ async function exportStandalone(){
     const ee = out.indexOf('\n', es);
     out = out.slice(0, es) + 'const EMBED = true;' + out.slice(ee);
 
-    // 2) 内联 editor.js（替换外部加载脚本标签）
-    const jsTxt = await fetch('editor.js?v='+Date.now()).then(r=>r.text());
-    const jsSafe = jsTxt.replace(/<\/script/gi, '<\\/script');
+    // 2) 内联 templates.js + editor.js（替换外部加载脚本标签，保持 templates → editor 顺序）
+    const fetchSrc = f => fetch(f+'?v='+Date.now()).then(r=>r.text());
+    const tplTxt = await fetchSrc('templates.js');
+    const jsTxt = await fetchSrc('editor.js');
+    const safe = t => t.replace(/<\/script/gi, '<\\/script');
     const ls = out.indexOf('<script>document.write');
     if(ls<0) throw new Error('未找到 editor.js 加载脚本');
     const le = out.indexOf('<\/script>', ls) + '<\/script>'.length;
-    out = out.slice(0, ls) + '<script>' + jsSafe + '</' + 'script>' + out.slice(le);
+    out = out.slice(0, ls) + '<script>' + safe(tplTxt) + '</' + 'script><script>' + safe(jsTxt) + '</' + 'script>' + out.slice(le);
 
     // 3) 在 </body> 前注入数据：利用 preview.html EMBED 模式下暴露的 window.PFDEmbed.load() API。
     //    直接同步调用（不监听 load 事件）：inject 脚本位于最后一个 <\/script> 之后，此时 IIFE 已
@@ -4815,7 +5179,7 @@ async function exportStandalone(){
 }
 
 /* ============================================================
- * 18. 默认模板：还原工艺
+ * 27. 默认模板：还原工艺
  * ============================================================ */
 async function loadTemplate(){
   try{
@@ -4842,7 +5206,7 @@ async function loadTemplate(){
 }
 
 /* ============================================================
- * 19. 初始化（仅编辑页面执行）
+ * 28. 初始化（仅编辑页面执行）
  * ============================================================ */
 if(_isEditor){
 buildPalette();
@@ -4852,7 +5216,7 @@ histStack=[]; histIdx=-1; pushHistory();
 applyView();
 renderAll(); renderProps();
 setTimeout(()=>flash('拖拽左侧组件到画布开始搭建 · 点击端口连线'), 400);
-window.addEventListener('resize', ()=>{});
+window.addEventListener('resize', ()=>{ invalidateCTM(); });
 // 后端传感器：拉取目录供 tag 检索添加，周期刷新实时值
 loadSensorCatalog();
 setInterval(refreshSensorValues, 5000);
@@ -4867,6 +5231,7 @@ startTagLiveUpdate();
   const svg = el('canvas');
   const layerPipes = el('layerPipes');
   const layerEquip = el('layerEquip');
+  const layerTop = el('layerTop');
   const layerFlow = el('layerFlow');
   const mk = tag => document.createElementNS(NS, tag);
 
@@ -4913,6 +5278,27 @@ startTagLiveUpdate();
         if(comp.type==='text') return;
         const params = (comp.props && comp.props.params) || [];
         const list = [];
+        if(comp.type==='monitor'){
+          // 监控器：测点来自 monitorTags（画布只显示数值，悬浮/抽屉显示名称与历史）
+          if(typeof normalizeMonitorPropsPreview==='function') normalizeMonitorPropsPreview(comp); // 旧版字段迁移可能尚未执行
+          const tags = (comp.props && Array.isArray(comp.props.monitorTags)) ? comp.props.monitorTags : [];
+          tags.forEach(t=>{
+            const tag = (t.tag || '').trim();
+            if(!tag) return;
+            const m = this.metaMap[tag];
+            list.push({
+              cid:comp.id,
+              key:tag,
+              label:t.label || tag,
+              unit:(m && m.unit) || '',
+              min:0,
+              max:100,
+              sensorTag:tag,
+              type:m ? m.type : '',
+              existsInBackend: !!m
+            });
+          });
+        } else
         // 【注意】不再自动生成模拟传感器，只有params中显式配置了k（sensor_tag）的才会关联
         params.forEach(p=>{
           const tag = (p.k || '').trim();
@@ -4973,6 +5359,7 @@ startTagLiveUpdate();
           }
         });
         this.liveMap = m;
+        if(typeof refreshKilnTemp==='function') refreshKilnTemp(this.liveMap, this.doc);
       }
     }catch(e){
       console.warn('实时数据刷新失败:', e);
@@ -5064,8 +5451,9 @@ startTagLiveUpdate();
   }
 
   function fmt(v){
+    // 与编辑器属性面板/监控器口径一致：最多保留2位小数，不做整数化（避免与数据库数值对不上）
     if(v==null || isNaN(v)) return '—';
-    return v.toFixed(v>=100?0:(v>=10?1:2));
+    return typeof fmtMonVal==='function' ? fmtMonVal(v) : String(Math.round(Number(v)*100)/100);
   }
 
   // ============================================================
@@ -5201,12 +5589,107 @@ startTagLiveUpdate();
   }
 
   // ============================================================
+  // 监控器组件：固定在画布上的实时数值面板 + 归属指向折线（adapter.liveMap 为唯一数据源）
+  // ============================================================
+  // 旧版数据迁移：monitorTag/monitorTag2 双字段 → monitorTags 列表（lead 连接线字段保留）
+  function normalizeMonitorPropsPreview(comp){
+    const p = comp.props || (comp.props = {});
+    if(!Array.isArray(p.monitorTags)){
+      const mt = [];
+      if(p.monitorTag) mt.push({tag:String(p.monitorTag), label:''});
+      if(p.monitorTag2) mt.push({tag:String(p.monitorTag2), label:''});
+      p.monitorTags = mt;
+    }
+    if(p.monitorTag!=null) delete p.monitorTag;
+    if(p.monitorTag2!=null) delete p.monitorTag2;
+  }
+  // 面板高度随监控项数量自适应（与 editor.js monitorAutoHeight 保持一致）
+  function monitorAutoHeightPreview(props){
+    const n = (props && Array.isArray(props.monitorTags)) ? props.monitorTags.length : 0;
+    return Math.max(n,1)*17 + 4;
+  }
+  // 归属折线终点：按 lead 目标类型解析世界坐标（无 lead 返回 null，不画线）
+  function monitorLeadTargetPreview(comp){
+    const lead = comp.props && comp.props.lead;
+    if(!lead) return null;
+    if(lead.targetType==='comp'){
+      const c = getComp(lead.cid);
+      if(c) return {x:c.x+c.w/2, y:c.y+c.h/2};
+    } else if(lead.targetType==='port'){
+      const c = getComp(lead.cid);
+      if(c){ const p = portPosComp(c, lead.port); if(p) return {x:p.x, y:p.y}; }
+    } else if(lead.targetType==='pipe'){
+      const p = getPipe(lead.pipeId);
+      if(p && p._pts) return pointAlongPath(p._pts, lead.pipeT==null?0.5:lead.pipeT);
+    }
+    return {x:lead.x, y:lead.y};
+  }
+  // 渲染归属折线（锚点自动选边 + 虚线 + 目标端点圆点），追加到 layerTop
+  // 线宽/透明度取全局样式 doc.meta.monitorLeadStyle（与 editor.js 一致，默认 1.6 / 0.85）
+  function renderMonitorLeadPreview(comp){
+    const b = monitorLeadTargetPreview(comp);
+    if(!b) return;
+    const st = (doc.meta && doc.meta.monitorLeadStyle) || {};
+    const lw = (+st.width > 0) ? +st.width : 1.6;
+    const lop = (st.opacity != null && +st.opacity >= 0 && +st.opacity <= 1) ? +st.opacity : 0.85;
+    const y = comp.y + comp.h/2;
+    const a = (b.x < comp.x + comp.w/2) ? {x:comp.x, y} : {x:comp.x+comp.w, y};
+    const pts = [{x:a.x, y:a.y}];
+    const bend = comp.props.lead && comp.props.lead.bend;
+    if(bend) pts.push({x:bend.x, y:bend.y});
+    pts.push({x:b.x, y:b.y});
+    const g = mk('g');
+    g.setAttribute('class','lead-group');
+    g.dataset.id = comp.id;
+    const path = mk('path');
+    path.setAttribute('d', ptsToD(pts));
+    path.setAttribute('class','lead-path');
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke','#00E5FF');
+    path.setAttribute('stroke-width', lw);
+    path.setAttribute('stroke-dasharray','5 3');
+    path.setAttribute('opacity', lop);
+    path.setAttribute('pointer-events','none');
+    g.appendChild(path);
+    const end = pts[pts.length-1];
+    const dot = mk('circle');
+    dot.setAttribute('cx', end.x); dot.setAttribute('cy', end.y);
+    dot.setAttribute('r', 3.5);
+    dot.setAttribute('class','lead-dot');
+    dot.setAttribute('fill','#00E5FF');
+    dot.setAttribute('stroke','#0a0a1a'); dot.setAttribute('stroke-width','0.8');
+    dot.setAttribute('pointer-events','none');
+    g.appendChild(dot);
+    layerTop.appendChild(g);
+  }
+  // 刷新监控器实时数值/单位（每监控项一行）
+  // 注：preview 渲染的组件组挂 data-cid（editor 端为 data-id）
+  function refreshMonitorValuesPreview(){
+    if(!layerTop) return;
+    const live = (adapter && adapter.liveMap) || {};
+    doc.components.forEach(comp=>{
+      if(comp.type!=='monitor') return;
+      const g = layerTop.querySelector(`.equip-group[data-cid="${comp.id}"]`);
+      if(!g) return;
+      const tags = (comp.props && comp.props.monitorTags) || [];
+      tags.forEach((t,i)=>{
+        const v = t.tag ? live[t.tag] : null;
+        const valEl = g.querySelector(`.mon-value[data-i="${i}"]`);
+        const unitEl = g.querySelector(`.mon-unit[data-i="${i}"]`);
+        if(valEl) valEl.textContent = (v && v.value!=null && v.value!=='') ? fmtMonVal(v.value) : '--';
+        if(unitEl) unitEl.textContent = (v && v.unit) ? ' '+v.unit : '';
+      });
+    });
+  }
+
+  // ============================================================
   // 渲染
   // ============================================================
   function render(){
     rebuildIndex();
     layerPipes.innerHTML = '';
     layerEquip.innerHTML = '';
+    layerTop.innerHTML = '';
     layerFlow.innerHTML = '';
 
     // Pipes
@@ -5255,64 +5738,63 @@ startTagLiveUpdate();
     // Equipment (interactive)
     doc.components.forEach(comp=>{
       const t = TEMPLATES[comp.type]; if(!t) return;
+      const isMonitor = comp.type === 'monitor';
+      const layer = isMonitor ? layerTop : layerEquip;
+      if(isMonitor){
+        normalizeMonitorPropsPreview(comp);            // 旧版双 tag 字段迁移
+        comp.h = monitorAutoHeightPreview(comp.props); // 高度随监控项数量自适应
+        renderMonitorLeadPreview(comp);                // 归属指向折线（先画，位于面板之下）
+      }
       const g = mk('g');
       g.setAttribute('transform', `translate(${comp.x},${comp.y}) rotate(${comp.rotation||0} ${comp.w/2} ${comp.h/2})`);
-      const clipId = 'clip-' + comp.id;
-      const defs = mk('defs');
-      const clip = mk('clipPath');
-      clip.setAttribute('id', clipId);
-      const clipRect = mk('rect');
-      clipRect.setAttribute('x', -2); clipRect.setAttribute('y', -2);
-      clipRect.setAttribute('width', comp.w+4); clipRect.setAttribute('height', comp.h+4);
-      clipRect.setAttribute('rx', 4);
-      clip.appendChild(clipRect);
-      defs.appendChild(clip);
-      g.appendChild(defs);
-      const bodyWrap = mk('g');
-      bodyWrap.setAttribute('clip-path', `url(#${clipId})`);
+      // 注：原 clip-path 为死代码（子节点被移出 bodyWrap），已移除
       const mirrored = comp.props && comp.props.mirrored;
+      const markup = running ? t.render(comp.w, comp.h, comp.props)
+                             : (typeof stripSMIL==='function' ? stripSMIL(t.render(comp.w, comp.h, comp.props)) : t.render(comp.w, comp.h, comp.props));
       if(mirrored){
         const mirrorG = mk('g');
         mirrorG.setAttribute('transform', `translate(${comp.w},0) scale(-1,1)`);
-        mirrorG.innerHTML = t.render(comp.w, comp.h, comp.props);
-        bodyWrap.appendChild(mirrorG);
+        mirrorG.innerHTML = markup;
+        g.appendChild(mirrorG);
       } else {
-        bodyWrap.innerHTML = t.render(comp.w, comp.h, comp.props);
+        const bodyG = mk('g');
+        bodyG.innerHTML = markup;
+        g.appendChild(bodyG);
       }
-      Array.from(bodyWrap.children).forEach(c=>g.appendChild(c));
-      layerEquip.appendChild(g);
+      layer.appendChild(g);
 
       // 标签（在旋转组外）
       const cx = comp.x + comp.w/2, cy = comp.y + comp.h/2;
       const r = (comp.rotation||0) * Math.PI/180;
       const cos = Math.cos(r), sin = Math.sin(r);
-      if(comp.type!=='text'){
+      if(comp.type!=='text' && !isMonitor){
         const lbl = mk('text');
         const ldx=0, ldy=-(comp.h/2+6);
         lbl.setAttribute('x', cx+ldx*cos-ldy*sin);
         lbl.setAttribute('y', cy+ldx*sin+ldy*cos);
         lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('class','tlabel');
         lbl.textContent = comp.props.name || t.name;
-        layerEquip.appendChild(lbl);
+        layer.appendChild(lbl);
       }
-      if(comp.props.tag){
+      if(comp.props.tag && !isMonitor){
         const tg = mk('text');
         const tdx=0, tdy=(comp.h/2+14);
         tg.setAttribute('x', cx+tdx*cos-tdy*sin);
         tg.setAttribute('y', cy+tdx*sin+tdy*cos);
         tg.setAttribute('text-anchor','middle'); tg.setAttribute('class','ttag');
         tg.textContent = comp.props.tag;
-        layerEquip.appendChild(tg);
+        layer.appendChild(tg);
       }
       // params 值不渲染在画布上，悬浮面板(dpSensors/hpRows)已展示实时数据
 
-      // 交互：透明命中框 + 事件
+      // 交互：透明命中框 + 事件（monitor 与其他组件一致：悬浮看详情、点击开历史抽屉）
       if(comp.type!=='text'){
         const hit = mk('rect');
         hit.setAttribute('x',0); hit.setAttribute('y',0);
         hit.setAttribute('width',comp.w); hit.setAttribute('height',comp.h);
         hit.setAttribute('fill','rgba(156,153,255,0)');
         hit.setAttribute('class','equip-hoverbox');
+        hit.setAttribute('pointer-events','auto');
         g.appendChild(hit);
         g.classList.add('equip-group');
         g.dataset.cid = comp.id;
@@ -5322,6 +5804,9 @@ startTagLiveUpdate();
         g.addEventListener('click', ev=>{ ev.stopPropagation(); selectComponent(comp); });
       }
     });
+    // 重建 DOM 后 SMIL 时间线重置，按 running 状态恢复正确的播放/暂停
+    if(typeof applySMILState==='function') applySMILState();
+    if(typeof refreshKilnTemp==='function' && adapter && adapter.liveMap) refreshKilnTemp(adapter.liveMap, doc);
   }
 
   // ============================================================
@@ -5333,6 +5818,7 @@ startTagLiveUpdate();
       if(adapter && adapter.update && !adapter.error) adapter.update();
       refreshHover();
       refreshDetail();
+      refreshMonitorValuesPreview();
     }, DATA_CONFIG.refreshMs);
   }
   function stopLive(){ if(liveTimer){ clearInterval(liveTimer); liveTimer=null; } }
@@ -5351,6 +5837,7 @@ startTagLiveUpdate();
     // 刷新当前悬浮面板/详情面板
     refreshHover();
     refreshDetail();
+    refreshMonitorValuesPreview();
   }
 
   // ============================================================
@@ -5393,7 +5880,7 @@ startTagLiveUpdate();
     });
     box.innerHTML = html;
     const t = hoverTime();
-    el('hpTime').textContent = t ? '更新于 ' + t : '';
+    el('hpTime').textContent = t;
   }
   function refreshHover(){
     if(!hoverCid) return;
@@ -5417,7 +5904,9 @@ startTagLiveUpdate();
     if(!sensors.length) return '';
     const live = adapter.getSensorLive(sensors[0]);
     if(!live || !live.ts || live.noData) return '';
-    return new Date(live.ts).toLocaleTimeString();
+    // 相对时间：上一次更新在 N 分钟之前
+    const diffMin = Math.floor((Date.now() - live.ts) / 60000);
+    return diffMin < 1 ? '上一次更新在 1 分钟内' : '上一次更新在 ' + diffMin + ' 分钟之前';
   }
 
   // ============================================================
@@ -5430,9 +5919,9 @@ startTagLiveUpdate();
 
   function selectComponent(comp){
     selectedCid = comp.id;
-    // 高亮
+    // 高亮（monitor 在 layerTop，其余在 layerEquip）
     document.querySelectorAll('.equip-group.selected').forEach(e=>e.classList.remove('selected'));
-    const g = layerEquip.querySelector(`[data-cid="${comp.id}"]`);
+    const g = layerEquip.querySelector(`[data-cid="${comp.id}"]`) || layerTop.querySelector(`[data-cid="${comp.id}"]`);
     if(g) g.classList.add('selected');
 
     el('dpName').textContent = comp.props.name || TEMPLATES[comp.type].name;
@@ -5512,7 +6001,9 @@ startTagLiveUpdate();
 
   // 历史曲线（Canvas 绘制，无第三方依赖）- 支持异步加载真实历史数据
   let chartLoading = false;
+  let chartSeq = 0; // 请求序号：防止异步竞态（切换传感器/时间范围后，旧请求返回覆盖新图）
   async function drawChart(){
+    const seq = ++chartSeq;
     const canvas = el('chart');
     if(!selectedSensor){ el('chartSensorName').textContent='—'; el('chartCur').textContent='—'; clearChart(); return; }
     if(!adapter || adapter.error || !adapter.getSensorLive){
@@ -5552,9 +6043,17 @@ startTagLiveUpdate();
       series = [];
     }
 
-    // 重新获取canvas上下文（可能在await期间被重绘）
-    const curSensor = selectedSensor;
-    if(curSensor !== selectedSensor) return; // 用户已切换传感器，放弃绘制
+    // await 期间若已有更新的绘制请求（切换传感器/时间范围/定时刷新），放弃本次旧数据
+    if(seq !== chartSeq) return;
+    // 补上实时当前值点：历史接口末点通常滞后数秒，追加后曲线末端与面板当前值严格一致
+    // （getHistory 缓存命中返回原数组引用，须先复制再追加，避免污染缓存）
+    if(series && series.length){
+      const liveNow = adapter.getSensorLive(selectedSensor);
+      if(liveNow && !liveNow.noData && liveNow.value!=null && !isNaN(Number(liveNow.value))){
+        const lastP = series[series.length-1];
+        if(!lastP || liveNow.ts > lastP.ts){ series = series.slice(); series.push({ ts: liveNow.ts, value: Number(liveNow.value) }); }
+      }
+    }
     canvas.width = W*dpr; canvas.height = H*dpr;
     const ctx2 = canvas.getContext('2d');
     ctx2.setTransform(dpr,0,0,dpr,0,0);
@@ -5639,10 +6138,18 @@ startTagLiveUpdate();
   // ============================================================
   // 流动动画
   // ============================================================
+  // 预览页专属 SMIL 开关：跟随预览页自身的 running 状态
+  // （editor.js 的全局 applySMILState 引用其自身的 running，在预览页恒为 false，会把 SMIL 时间线永久冻结）
+  function applySMILState(){
+    try{ if(running){ svg.unpauseAnimations(); } else { svg.pauseAnimations(); } }catch(err){}
+  }
   let flowNodes = [];   // 粒子节点池：复用于每次动画帧，避免每帧销毁/重建
   const FLOW_TRAIL = 4; // 每个主粒子随影拖尾数（拖尾越长越流畅，节点数 = 粒子数*(1+FLOW_TRAIL)）
   function startFlow(){
     if(flowRAF) return;
+    // 停止态曾剥离 SMIL 动画元素，运行前重新渲染注入
+    if(svg && !svg.querySelector('animate,animateTransform') && doc.components.length) render();
+    if(typeof applySMILState==='function') applySMILState();
     function ensureNodes(n){
       // 若上次池中的节点已被重渲染清出 DOM（未连接），整体重建池
       if(flowNodes.length && !flowNodes[0].isConnected){ flowNodes = []; layerFlow.innerHTML=''; }
@@ -5712,7 +6219,13 @@ startTagLiveUpdate();
     }
     tick();
   }
-  function stopFlow(){ if(flowRAF){ cancelAnimationFrame(flowRAF); flowRAF=null; } layerFlow.innerHTML=''; flowNodes.length=0; }
+  function stopFlow(){
+    if(flowRAF){ cancelAnimationFrame(flowRAF); flowRAF=null; }
+    layerFlow.innerHTML=''; flowNodes.length=0;
+    // 停止后剥离 SMIL 动画元素
+    if(svg && svg.querySelector('animate,animateTransform') && doc.components.length) render();
+    if(typeof applySMILState==='function') applySMILState();
+  }
 
   // ============================================================
   // 画布平移/缩放
@@ -5845,5 +6358,5 @@ startTagLiveUpdate();
   window.addEventListener('resize', ()=>{ applyView(); if(detailPanel.classList.contains('open')) drawChart(); });
 })();
 </script>
-<script>(function(){var d={"version":1,"components":[{"id":"cv5i1lk","type":"box","x":280,"y":20,"w":81.72177124023438,"h":81.07854080200195,"rotation":0,"props":{"name":"XV0106","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c2h1sjg","type":"switchValve","x":400,"y":60,"w":120,"h":150,"rotation":0,"props":{"name":"固体三通阀","tag":"","color":"#9C99FF","params":[],"showPorts":true,"switchValve":0}},{"id":"cftedn3","type":"screwConveyor","x":480,"y":280,"w":148.60397338867188,"h":59.87129211425781,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cvgr8ry","type":"screwConveyor","x":300,"y":280,"w":148.60397338867188,"h":59.87129211425781,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"c7wraui","type":"silo","x":220,"y":360,"w":90,"h":150,"rotation":0,"props":{"name":"料仓","tag":"V0201","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c9i9h7o","type":"silo","x":620,"y":360,"w":90,"h":150,"rotation":0,"props":{"name":"料仓","tag":"V0202","color":"#9C99FF","params":[{"k":"1#窑1#仓锰粉失重秤","v":"0","u":""},{"k":"1#窑二级冷却器E0202阀位","v":"0","u":""},{"k":"1#窑体供气风机C0204阀位","v":"0","u":""}],"showPorts":true}},{"id":"cdwj84q","type":"weighFeeder","x":220,"y":600,"w":90.7869873046875,"h":92.75439453125,"rotation":0,"props":{"name":"配料秤","tag":"","color":"#9C99FF","params":[{"k":"1#窑1#仓锰粉失重秤","v":"0","u":""}],"showPorts":true}},{"id":"cxi7c5v","type":"screwConveyor","x":400,"y":620,"w":267.0221862792969,"h":71.91217041015625,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"clqb7q1","type":"screwConveyor","x":500,"y":540,"w":249.37429809570312,"h":62.30609130859375,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"cky5j1k","type":"rotaryKiln","x":700,"y":680,"w":380,"h":180,"rotation":0,"props":{"name":"回转窑/旋转煅烧窑","tag":"","color":"#9C99FF","params":[{"k":"1#窑窑头压力PI_206A","v":"0","u":""},{"k":"1#窑体温度TI_206A","v":"0","u":""},{"k":"1#窑体温度TI_206B","v":"0","u":""},{"k":"1#窑体温度TI_206E","v":"0","u":""},{"k":"1#窑体温度TI_206F","v":"0","u":""},{"k":"1#窑窑尾压力PI_206B","v":"0","u":""}],"showPorts":true}},{"id":"c5tli5c","type":"tubeCooler","x":1140,"y":700,"w":300,"h":157.7227783203125,"rotation":0,"props":{"name":"回转滚筒冷却机","tag":"","color":"#9C99FF","params":[{"k":"1#窑冷却器进口物料温度TI_207","v":"0","u":""},{"k":"1#窑冷却循环水进水温度TI_210","v":"0","u":""},{"k":"1#窑冷却器出口物料温度TI209","v":"0","u":""}],"showPorts":true}},{"id":"c41zzyw","type":"valve","x":780,"y":560,"w":39.6124267578125,"h":27.36431884765625,"rotation":0,"props":{"name":" ","tag":"手动阀","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cpa9whi","type":"dustCollector","x":880,"y":340,"w":120,"h":180,"rotation":0,"props":{"name":"除尘布袋","tag":"","color":"#9C99FF","params":[{"k":"1#窑布袋除尘进口温度TI212","v":"0","u":""},{"k":"1#窑布袋除尘本体温度TI_201","v":"0","u":""},{"k":"1#窑布袋除尘出口温度TI_203","v":"0","u":""}],"showPorts":true}},{"id":"cpkytsa","type":"screwConveyor","x":880,"y":560,"w":201.2919921875,"h":57.05426025390625,"rotation":0,"props":{"name":"螺旋输送机","tag":"L0205B","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c335rfh","type":"blower","x":740,"y":280,"w":75.861328125,"h":69.99862670898438,"rotation":0,"props":{"name":"离心风机/鼓风机","tag":"","color":"#9C99FF","params":[{"k":"1#窑布袋除尘出口温度TI_203","v":"0","u":""},{"k":"1#窑布袋除尘风机C0203阀位","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"clbc8do","type":"desulfTower","x":1000,"y":0,"w":120,"h":297.28591871261597,"rotation":0,"props":{"name":"工业脱硫塔","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cti8zsk","type":"blower","x":1120,"y":280,"w":75.861328125,"h":62.295166015625,"rotation":0,"props":{"name":"泵","tag":"","color":"#9C99FF","params":[],"showPorts":true,"mirrored":false}},{"id":"cqqfd5n","type":"box","x":780,"y":200,"w":62.61798095703125,"h":41.09211730957031,"rotation":0,"props":{"name":"C0204","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c4ndpuc","type":"blower","x":240,"y":820,"w":66.66668701171875,"h":86.7183837890625,"rotation":90,"props":{"name":"。。。。供风机","tag":"C0204C","color":"#9C99FF","params":[{"k":"1#窑供气流量FI_204","v":"0","u":""},{"k":"1#窑体供气风机C0204阀位","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"chqjt6v","type":"blower","x":240,"y":920,"w":66.66668701171875,"h":86.7183837890625,"rotation":90,"props":{"name":"。。。。供风机","tag":" ","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"cepvyg7","type":"valve","x":580,"y":940,"w":84.008056640625,"h":44.7008056640625,"rotation":0,"props":{"name":" ","tag":"气密阀","color":"#9C99FF","params":[{"k":"1#窑天然气瞬时流量FI_203","v":"0","u":""}],"showPorts":true}},{"id":"cqxvh8j","type":"coolingPond","x":1200,"y":380,"w":192.5611572265625,"h":120,"rotation":0,"props":{"name":"冷却水池","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"ceq4k9q","type":"screwConveyor","x":1260,"y":900,"w":213.18994140625,"h":79.015869140625,"rotation":0,"props":{"name":"L0301","tag":"","color":"#9C99FF","params":[{"k":"1#成品称瞬时流量FI_0302","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"cva5r78","type":"pump","x":1460,"y":400,"w":46.450439453125,"h":29.742584228515625,"rotation":0,"props":{"name":"工业抽水泵","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cs6c3nk","type":"pump","x":1460,"y":440,"w":46.450439453125,"h":29.742584228515625,"rotation":0,"props":{"name":"工业抽水泵","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cp0llhp","type":"pump","x":1440,"y":620,"w":46.450439453125,"h":29.742584228515625,"rotation":90,"props":{"name":" ","tag":"P0202A","color":"#9C99FF","params":[{"k":"1#窑冷却循环泵P0202A阀位","v":"0","u":""},{"k":"1#窑冷却循环水进水温度TI_210","v":"0","u":""}],"showPorts":true}},{"id":"cjeo19x","type":"pump","x":1520,"y":620,"w":46.450439453125,"h":29.742584228515625,"rotation":90,"props":{"name":" ","tag":"P0202B","color":"#9C99FF","params":[{"k":"1#窑冷却循环泵P0202B阀位","v":"0","u":""}],"showPorts":true}},{"id":"cnso1vn","type":"weighFeeder","x":320,"y":360,"w":122.016357421875,"h":147.11322021484375,"rotation":0,"props":{"name":"煤粉配料秤","tag":"","color":"#9C99FF","params":[{"k":"1#窑煤粉称瞬时流量","v":"0","u":""}],"showPorts":true}}],"pipes":[{"id":"psgi3ck","type":"solid","from":{"cid":"cv5i1lk","port":"right"},"to":{"cid":"c2h1sjg","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"bend":{"x":340,"y":80},"straight":true},{"id":"pcczsn9","type":"solid","from":{"cid":"c2h1sjg","port":"outletB"},"to":{"cid":"cftedn3","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"straight":true},{"id":"pxcrk9s","type":"solid","from":{"cid":"c2h1sjg","port":"outletA"},"to":{"cid":"cvgr8ry","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"straight":true},{"id":"pbvxtrn","type":"solid","from":{"cid":"cftedn3","port":"outlet"},"to":{"cid":"c9i9h7o","port":"top"},"label":"","width":2.5,"labelPos":0.5,"straight":true},{"id":"pchv8g2","type":"solid","from":{"cid":"cvgr8ry","port":"outlet"},"to":{"cid":"c7wraui","port":"top"},"label":"","width":2.5,"labelPos":0.5,"straight":true},{"id":"pl8d487","type":"solid","from":{"cid":"c7wraui","port":"bottom"},"to":{"cid":"cdwj84q","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true},{"id":"pl9e86s","type":"solid","from":{"cid":"c9i9h7o","port":"bottom"},"to":{"cid":"clqb7q1","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true},{"id":"pw8cdvg","type":"solid","from":{"cid":"clqb7q1","port":"right"},"to":{"cid":"cxi7c5v","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5},{"id":"px92weh","type":"solid","from":{"cid":"cdwj84q","port":"outlet"},"to":{"cid":"cky5j1k","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"bend":{"x":440,"y":760}},{"id":"pm7wq9k","type":"solid","from":{"cid":"cxi7c5v","port":"outlet"},"to":{"cid":"cky5j1k","port":"inlet"},"label":"","width":2.5,"labelPos":0.5},{"id":"pgevbfl","type":"gas","from":{"cid":"cky5j1k","port":"flueGas"},"to":{"cid":"c41zzyw","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":760,"y":620}},{"id":"p79s3st","type":"gas","from":{"cid":"c41zzyw","port":"out"},"to":{"cid":"cpa9whi","port":"cleanGas"},"label":"","width":2.5,"labelPos":0.5},{"id":"pg7bhry","type":"solid","from":{"cid":"cpa9whi","port":"outlet"},"to":{"cid":"cpkytsa","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true},{"id":"prfhzfb","type":"gas","from":{"cid":"cpa9whi","port":"inlet"},"to":{"cid":"c335rfh","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":840,"y":320}},{"id":"pgbphj7","type":"cool","from":{"cid":"clbc8do","port":"slurryOut"},"to":{"cid":"cti8zsk","port":"in"},"label":"","width":2.5,"labelPos":0.5},{"id":"p4tq6sk","type":"cool","from":{"cid":"cti8zsk","port":"out"},"to":{"cid":"clbc8do","port":"sprayIn"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1140,"y":100}},{"id":"pxr9ykg","type":"gas","from":{"cid":"c335rfh","port":"out"},"to":{"cid":"clbc8do","port":"overflow"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":980,"y":260}},{"id":"pdtzx5p","type":"solid","from":{"cid":"clbc8do","port":"gasIn"},"to":{"cid":"cqqfd5n","port":"right"},"label":"","width":2.5,"labelPos":0.5},{"id":"pamlvg0","type":"gas","from":{"cid":"chqjt6v","port":"out"},"to":{"cid":"cepvyg7","port":"in"},"label":"天然气","width":2.5,"labelPos":0.5},{"id":"pj76rvv","type":"hot","from":{"cid":"c4ndpuc","port":"out"},"to":{"cid":"cky5j1k","port":"outlet"},"label":"热气","width":2.5,"labelPos":0.5,"bend":{"x":1100,"y":860}},{"id":"p36lfwj","type":"gas","from":{"cid":"cepvyg7","port":"out"},"to":{"cid":"cky5j1k","port":"outlet"},"label":"天然气","width":2.5,"labelPos":0.5,"bend":{"x":1100,"y":820}},{"id":"p5e4ef1","type":"solid","from":{"cid":"cky5j1k","port":"fuel"},"to":{"cid":"c5tli5c","port":"inlet"},"label":"氧化锰","width":2.5,"labelPos":0.5},{"id":"pu17jwl","type":"solid","from":{"cid":"c5tli5c","port":"airIn"},"to":{"cid":"ceq4k9q","port":"inlet"},"label":"","width":2.5,"labelPos":0.5},{"id":"pgkglyf","type":"cool","from":{"cid":"c5tli5c","port":"airOut"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1220,"y":360}},{"id":"p33vqz6","type":"cool","from":{"cid":"cqxvh8j","port":"overflow"},"to":{"cid":"cva5r78","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1420,"y":420}},{"id":"p9qftun","type":"cool","from":{"cid":"cqxvh8j","port":"overflow"},"to":{"cid":"cs6c3nk","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1420,"y":460}},{"id":"pyw4kkt","type":"cool","from":{"cid":"cva5r78","port":"out"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1580,"y":340}},{"id":"pu003ij","type":"cool","from":{"cid":"cs6c3nk","port":"out"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1580,"y":360}},{"id":"p3xhayi","type":"cool","from":{"cid":"cqxvh8j","port":"outlet"},"to":{"cid":"cp0llhp","port":"in"},"label":"","width":2.5,"labelPos":0.5},{"id":"pzaf7y1","type":"cool","from":{"cid":"cqxvh8j","port":"outlet"},"to":{"cid":"cjeo19x","port":"in"},"label":"","width":2.5,"labelPos":0.5},{"id":"p64r835","type":"cool","from":{"cid":"cjeo19x","port":"out"},"to":{"cid":"c5tli5c","port":"outlet"},"label":"","width":2.5,"labelPos":0.5},{"id":"pfdns33","type":"cool","from":{"cid":"cp0llhp","port":"out"},"to":{"cid":"c5tli5c","port":"outlet"},"label":"","width":2.5,"labelPos":0.5},{"id":"pabn3nr","type":"solid","from":{"cid":"cnso1vn","port":"outlet"},"to":{"cid":"cxi7c5v","port":"left"},"label":"煤粉","width":2.5,"labelPos":0.5}],"meta":{"title":"未命名流程","bg":"#070612"}};try{window.PFDEmbed.load(d)}catch(e){console.error("Standalone load error:",e);setTimeout(function(){try{window.PFDEmbed.load(d)}catch(e2){console.error("Retry failed:",e2)}},100)}var t=(d.meta&&d.meta.title)||"PFD";if(document.getElementById("docTitle"))document.getElementById("docTitle").textContent=t;document.title=t+" · 预览";})()</script></body>
+<script>(function(){var d={"version":1,"components":[{"id":"cv5i1lk","type":"box","x":280,"y":20,"w":81.72177124023438,"h":81.07854080200195,"rotation":0,"props":{"name":"XV0106","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c2h1sjg","type":"switchValve","x":400,"y":60,"w":120,"h":150,"rotation":0,"props":{"name":"固体三通阀","tag":"","color":"#9C99FF","params":[],"showPorts":true,"switchValve":0}},{"id":"cftedn3","type":"screwConveyor","x":480,"y":280,"w":148.60397338867188,"h":42.06504821777344,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cvgr8ry","type":"screwConveyor","x":300,"y":280,"w":148.60397338867188,"h":40.19075012207031,"rotation":0,"props":{"name":"螺旋输送机","tag":"","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"c7wraui","type":"silo","x":220,"y":360,"w":90,"h":150,"rotation":0,"props":{"name":"料仓","tag":"V0201","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c9i9h7o","type":"silo","x":600,"y":360,"w":90,"h":150,"rotation":0,"props":{"name":"料仓","tag":"V0202","color":"#9C99FF","params":[{"k":"1#窑1#仓锰粉失重秤","v":"0","u":""},{"k":"1#窑二级冷却器E0202阀位","v":"0","u":""},{"k":"1#窑体供气风机C0204阀位","v":"0","u":""}],"showPorts":true}},{"id":"cdwj84q","type":"weighFeeder","x":220,"y":620,"w":82.7232666015625,"h":69.90716552734375,"rotation":0,"props":{"name":"配料秤","tag":"M0201SZ","color":"#9C99FF","params":[{"k":"1#窑1#仓锰粉失重秤","v":"0","u":""}],"showPorts":true}},{"id":"cxi7c5v","type":"screwConveyor","x":400,"y":620,"w":267.0221862792969,"h":48.26947021484375,"rotation":0,"props":{"name":"螺旋输送机","tag":"L0201","color":"#9C99FF","params":[],"showPorts":true}},{"id":"clqb7q1","type":"screwConveyor","x":500,"y":540,"w":207.24203491210938,"h":41.3162841796875,"rotation":0,"props":{"name":"螺旋输送机","tag":"L0202B","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"cky5j1k","type":"rotaryKiln","x":700,"y":680,"w":480,"h":180,"rotation":0,"props":{"name":"旋转煅烧窑","tag":"R0202","color":"#9C99FF","params":[{"k":"1#窑窑头压力PI_206A","v":"0","u":""},{"k":"1#窑体温度TI_206A","v":"0","u":""},{"k":"1#窑体温度TI_206B","v":"0","u":""},{"k":"1#窑体温度TI_206E","v":"0","u":""},{"k":"1#窑体温度TI_206F","v":"0","u":""},{"k":"1#窑窑尾压力PI_206B","v":"0","u":""}],"showPorts":true,"tempPoints":[{"tag":"1#窑体温度TI_206A"},{"tag":"1#窑体温度TI_206B"},{"tag":"1#窑体温度TI_206E"},{"tag":"1#窑体温度TI_206F"}]}},{"id":"c5tli5c","type":"tubeCooler","x":1240,"y":700,"w":346.5523681640625,"h":157.7227783203125,"rotation":0,"props":{"name":"回转滚筒冷却机","tag":"E0202","color":"#9C99FF","params":[{"k":"1#窑冷却器进口物料温度TI_207","v":"0","u":""},{"k":"1#窑冷却循环水进水温度TI_210","v":"0","u":""},{"k":"1#窑冷却器出口物料温度TI209","v":"0","u":""}],"showPorts":true}},{"id":"c41zzyw","type":"valve","x":760,"y":380,"w":39.6124267578125,"h":27.36431884765625,"rotation":0,"props":{"name":" ","tag":"手动阀","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cpa9whi","type":"dustCollector","x":880,"y":340,"w":120,"h":180,"rotation":0,"props":{"name":"除尘布袋","tag":"DC202","color":"#9C99FF","params":[{"k":"1#窑布袋除尘进口温度TI212","v":"0","u":""},{"k":"1#窑布袋除尘本体温度TI_201","v":"0","u":""},{"k":"1#窑布袋除尘出口温度TI_203","v":"0","u":""}],"showPorts":true}},{"id":"cpkytsa","type":"screwConveyor","x":880,"y":560,"w":201.2919921875,"h":45.8082275390625,"rotation":0,"props":{"name":"螺旋输送机","tag":"L0205B","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c335rfh","type":"blower","x":740,"y":280,"w":75.861328125,"h":69.99862670898438,"rotation":0,"props":{"name":"鼓风机","tag":"C0203A","color":"#9C99FF","params":[{"k":"1#窑布袋除尘出口温度TI_203","v":"0","u":""},{"k":"1#窑布袋除尘风机C0203阀位","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"clbc8do","type":"desulfTower","x":1000,"y":0,"w":120,"h":297.28591871261597,"rotation":0,"props":{"name":"工业脱硫塔","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cti8zsk","type":"blower","x":1120,"y":280,"w":75.861328125,"h":62.295166015625,"rotation":0,"props":{"name":"泵","tag":"","color":"#9C99FF","params":[],"showPorts":true,"mirrored":false}},{"id":"cqqfd5n","type":"box","x":780,"y":200,"w":62.61798095703125,"h":41.09211730957031,"rotation":0,"props":{"name":"C0204","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"c4ndpuc","type":"blower","x":240,"y":820,"w":66.66668701171875,"h":86.7183837890625,"rotation":90,"props":{"name":"。。。。供风机","tag":"C0204C","color":"#9C99FF","params":[{"k":"1#窑供气流量FI_204","v":"0","u":""},{"k":"1#窑体供气风机C0204阀位","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"chqjt6v","type":"blower","x":240,"y":920,"w":66.66668701171875,"h":86.7183837890625,"rotation":90,"props":{"name":"。。。。供风机","tag":" ","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"cepvyg7","type":"valve","x":580,"y":940,"w":84.008056640625,"h":44.7008056640625,"rotation":0,"props":{"name":" ","tag":"气密阀","color":"#9C99FF","params":[{"k":"1#窑天然气瞬时流量FI_203","v":"0","u":""}],"showPorts":true}},{"id":"cqxvh8j","type":"coolingPond","x":1300,"y":380,"w":192.5611572265625,"h":120,"rotation":0,"props":{"name":"冷却水池","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"ceq4k9q","type":"screwConveyor","x":1360,"y":900,"w":213.18994140625,"h":51.28192138671875,"rotation":0,"props":{"name":"L0301","tag":"","color":"#9C99FF","params":[{"k":"1#成品称瞬时流量FI_0302","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"cva5r78","type":"pump","x":1560,"y":400,"w":46.450439453125,"h":29.742584228515625,"rotation":0,"props":{"name":"工业抽水泵","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cs6c3nk","type":"pump","x":1560,"y":440,"w":46.450439453125,"h":29.742584228515625,"rotation":0,"props":{"name":"工业抽水泵","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"cp0llhp","type":"pump","x":1540,"y":620,"w":46.450439453125,"h":29.742584228515625,"rotation":90,"props":{"name":" ","tag":"P0202A","color":"#9C99FF","params":[{"k":"1#窑冷却循环泵P0202A阀位","v":"0","u":""},{"k":"1#窑冷却循环水进水温度TI_210","v":"0","u":""}],"showPorts":true}},{"id":"cjeo19x","type":"pump","x":1620,"y":620,"w":46.450439453125,"h":29.742584228515625,"rotation":90,"props":{"name":" ","tag":"P0202B","color":"#9C99FF","params":[{"k":"1#窑冷却循环泵P0202B阀位","v":"0","u":""}],"showPorts":true}},{"id":"cnso1vn","type":"weighFeeder","x":360,"y":440,"w":82.3697509765625,"h":77.89962768554688,"rotation":0,"props":{"name":"煤粉配料秤","tag":"L0601A","color":"#9C99FF","params":[{"k":"1#窑煤粉称瞬时流量","v":"0","u":""}],"showPorts":true}},{"id":"c8cg5i4","type":"blower","x":580,"y":820,"w":66.66668701171875,"h":86.7183837890625,"rotation":90,"props":{"name":"。。。。供风机","tag":"C0203","color":"#9C99FF","params":[{"k":"1#窑供气流量FI_204","v":"0","u":""},{"k":"1#窑体供气风机C0204阀位","v":"0","u":""}],"showPorts":true,"mirrored":true}},{"id":"c20cki6","type":"blower","x":1180,"y":500,"w":57.922607421875,"h":54.44696044921875,"rotation":0,"props":{"name":"风机","tag":"C0205","color":"#9C99FF","params":[],"showPorts":true,"mirrored":true}},{"id":"c6gegab","type":"box","x":1180,"y":380,"w":62.61798095703125,"h":41.09211730957031,"rotation":0,"props":{"name":"干燥系统","tag":"","color":"#9C99FF","params":[],"showPorts":true}},{"id":"ctwrntw","type":"monitor","x":800,"y":700,"w":59.25701904296875,"h":21,"rotation":0,"props":{"name":"监控器","tag":"","color":"#00E5FF","params":[],"showPorts":true,"monitorTags":[{"tag":"1#窑体温度TI_206A","label":"206A"}],"lead":{"targetType":"point","x":768.4486083984375,"y":748.514404296875}}},{"id":"c7keqjl","type":"monitor","x":880,"y":700,"w":57.8603515625,"h":21,"rotation":0,"props":{"name":"监控器","tag":"","color":"#00E5FF","params":[],"showPorts":true,"monitorTags":[{"tag":"1#窑体温度TI_206B","label":"206B"}],"lead":{"targetType":"point","x":836.5857543945312,"y":747.302978515625}}},{"id":"ctafh5k","type":"monitor","x":980,"y":700,"w":56.92926025390625,"h":21,"rotation":0,"props":{"name":"监控器","tag":"","color":"#00E5FF","params":[],"showPorts":true,"monitorTags":[{"tag":"1#窑体温度TI_206E","label":"206E"}],"lead":{"targetType":"point","x":938.4580078125,"y":748.9730224609375}}},{"id":"cat0do9","type":"monitor","x":1080,"y":700,"w":60.6536865234375,"h":21,"rotation":0,"props":{"name":"监控器","tag":"","color":"#00E5FF","params":[],"showPorts":true,"monitorTags":[{"tag":"1#窑体温度TI_206F","label":"206F"}],"lead":{"targetType":"point","x":1042.835205078125,"y":746.4679565429688}}}],"pipes":[{"id":"psgi3ck","type":"solid","from":{"cid":"cv5i1lk","port":"right"},"to":{"cid":"c2h1sjg","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"bend":{"x":340,"y":80},"straight":true,"_segs":[98.27970828569964],"_segsTotal":98.27970828569964,"_segsFor":[{"x":361.7217712402344,"y":60.53927040100098},{"x":460,"y":60}]},{"id":"pcczsn9","type":"solid","from":{"cid":"c2h1sjg","port":"outletB"},"to":{"cid":"cftedn3","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"straight":true,"_segs":[80.91250302325523],"_segsTotal":80.91250302325523,"_segsFor":[{"x":484,"y":210},{"x":524.5811920166016,"y":280}]},{"id":"pxcrk9s","type":"solid","from":{"cid":"c2h1sjg","port":"outletA"},"to":{"cid":"cvgr8ry","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"straight":true,"_segs":[76.95805683083749],"_segsTotal":76.95805683083749,"_segsFor":[{"x":436,"y":210},{"x":404.0227813720703,"y":280}]},{"id":"pbvxtrn","type":"solid","from":{"cid":"cftedn3","port":"outlet"},"to":{"cid":"c9i9h7o","port":"top"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[51.150266967886836],"_segsTotal":51.150266967886836,"_segsFor":[{"x":628.6039733886719,"y":311.5487861633301},{"x":645,"y":360}]},{"id":"pchv8g2","type":"solid","from":{"cid":"cvgr8ry","port":"outlet"},"to":{"cid":"c7wraui","port":"top"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[60.91563188336659],"_segsTotal":60.91563188336659,"_segsFor":[{"x":300,"y":310.14306259155273},{"x":265,"y":360}]},{"id":"pl8d487","type":"solid","from":{"cid":"c7wraui","port":"bottom"},"to":{"cid":"cdwj84q","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[110.06015497098839],"_segsTotal":110.06015497098839,"_segsFor":[{"x":265,"y":510},{"x":261.36163330078125,"y":620}]},{"id":"pl9e86s","type":"solid","from":{"cid":"c9i9h7o","port":"bottom"},"to":{"cid":"clqb7q1","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[30.000080329103415],"_segsTotal":30.000080329103415,"_segsFor":[{"x":645,"y":510},{"x":645.0694244384765,"y":540}]},{"id":"pw8cdvg","type":"solid","from":{"cid":"clqb7q1","port":"right"},"to":{"cid":"cxi7c5v","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"_segs":[18,0.9466720581054915,41.34185791015625,0.9466720581054346,18],"_segsTotal":79.23520202636718,"_segsFor":[{"x":500,"y":560.6581420898438},{"x":482,"y":560.6581420898438},{"x":481.0533279418945,"y":560.6581420898438},{"x":481.0533279418945,"y":602},{"x":480.1066558837891,"y":602},{"x":480.1066558837891,"y":620}]},{"id":"px92weh","type":"solid","from":{"cid":"cdwj84q","port":"outlet"},"to":{"cid":"cky5j1k","port":"inlet"},"label":"锰粉","width":2.5,"labelPos":0.5,"bend":{"x":440,"y":760},"_segs":[18,52.09283447265625,420.63836669921875,0.7999999999999545,18],"_segsTotal":509.53120117187495,"_segsFor":[{"x":261.36163330078125,"y":689.9071655273438},{"x":261.36163330078125,"y":707.9071655273438},{"x":261.36163330078125,"y":760},{"x":682,"y":760},{"x":682,"y":759.2},{"x":700,"y":759.2}]},{"id":"pm7wq9k","type":"solid","from":{"cid":"cxi7c5v","port":"outlet"},"to":{"cid":"cky5j1k","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,1.5110931396484375,102.99789733886723,1.5110931396484375,18],"_segsTotal":142.0200836181641,"_segsFor":[{"x":667.0221862792969,"y":656.2021026611328},{"x":685.0221862792969,"y":656.2021026611328},{"x":683.5110931396484,"y":656.2021026611328},{"x":683.5110931396484,"y":759.2},{"x":682,"y":759.2},{"x":700,"y":759.2}]},{"id":"pgevbfl","type":"gas","from":{"cid":"cky5j1k","port":"flueGas"},"to":{"cid":"c41zzyw","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":760,"y":620},"straight":true,"_segs":[326.1386803276101],"_segsTotal":326.1386803276101,"_segsFor":[{"x":748,"y":719.6},{"x":760,"y":393.6821594238281}]},{"id":"p79s3st","type":"gas","from":{"cid":"c41zzyw","port":"out"},"to":{"cid":"cpa9whi","port":"cleanGas"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,22.19378662109375,0.317840576171875,22.19378662109375,18],"_segsTotal":80.70541381835938,"_segsFor":[{"x":799.6124267578125,"y":393.6821594238281},{"x":817.6124267578125,"y":393.6821594238281},{"x":839.8062133789062,"y":393.6821594238281},{"x":839.8062133789062,"y":394},{"x":862,"y":394},{"x":880,"y":394}]},{"id":"pg7bhry","type":"solid","from":{"cid":"cpa9whi","port":"outlet"},"to":{"cid":"cpkytsa","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[40.001877855209884],"_segsTotal":40.001877855209884,"_segsFor":[{"x":940,"y":520},{"x":940.38759765625,"y":560}]},{"id":"prfhzfb","type":"gas","from":{"cid":"cpa9whi","port":"inlet"},"to":{"cid":"c335rfh","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":840,"y":320},"_segs":[18,2,106.138671875,0.8007690429687386,18],"_segsTotal":144.93944091796874,"_segsFor":[{"x":940,"y":340},{"x":940,"y":322},{"x":940,"y":320},{"x":833.861328125,"y":320},{"x":833.861328125,"y":319.19923095703126},{"x":815.861328125,"y":319.19923095703126}]},{"id":"pgbphj7","type":"cool","from":{"cid":"clbc8do","port":"slurryOut"},"to":{"cid":"cti8zsk","port":"in"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,0.2003128719329652,42,0.20031287193302205,18],"_segsTotal":78.40062574386599,"_segsFor":[{"x":1060,"y":297.28591871261597},{"x":1060,"y":315.28591871261597},{"x":1060,"y":315.085605840683},{"x":1102,"y":315.085605840683},{"x":1102,"y":314.88529296875},{"x":1120,"y":314.88529296875}]},{"id":"p4tq6sk","type":"cool","from":{"cid":"cti8zsk","port":"out"},"to":{"cid":"clbc8do","port":"sprayIn"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1140,"y":100},"_segs":[18,162,21.4478906249999,1.0772123622894298,18],"_segsTotal":220.52510298728933,"_segsFor":[{"x":1159.447890625,"y":280},{"x":1159.447890625,"y":262},{"x":1159.447890625,"y":100},{"x":1138,"y":100},{"x":1138,"y":101.07721236228943},{"x":1120,"y":101.07721236228943}]},{"id":"pxr9ykg","type":"gas","from":{"cid":"c335rfh","port":"out"},"to":{"cid":"clbc8do","port":"overflow"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":980,"y":260},"_segs":[18,2,205.5865625,4.334109907150264,18],"_segsTotal":247.92067240715028,"_segsFor":[{"x":776.4134375,"y":280},{"x":776.4134375,"y":262},{"x":776.4134375,"y":260},{"x":982,"y":260},{"x":982,"y":255.66589009284974},{"x":1000,"y":255.66589009284974}]},{"id":"pdtzx5p","type":"solid","from":{"cid":"clbc8do","port":"gasIn"},"to":{"cid":"cqqfd5n","port":"right"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,60.691009521484375,0.5544788074493567,60.691009521484375,18],"_segsTotal":157.9364978504181,"_segsFor":[{"x":1000,"y":219.9915798473358},{"x":982,"y":219.9915798473358},{"x":921.3089904785156,"y":219.9915798473358},{"x":921.3089904785156,"y":220.54605865478516},{"x":860.6179809570312,"y":220.54605865478516},{"x":842.6179809570312,"y":220.54605865478516}]},{"id":"pamlvg0","type":"gas","from":{"cid":"chqjt6v","port":"out"},"to":{"cid":"cepvyg7","port":"in"},"label":"天然气","width":2.5,"labelPos":0.5,"_segs":[18,113.65373229980469,0.3245446777343659,113.65373229980469,18],"_segsTotal":263.63200927734374,"_segsFor":[{"x":316.6925354003906,"y":962.0258581542969},{"x":334.6925354003906,"y":962.0258581542969},{"x":448.3462677001953,"y":962.0258581542969},{"x":448.3462677001953,"y":962.3504028320312},{"x":562,"y":962.3504028320312},{"x":580,"y":962.3504028320312}]},{"id":"p36lfwj","type":"gas","from":{"cid":"cepvyg7","port":"out"},"to":{"cid":"cky5j1k","port":"outlet"},"label":"天然气","width":2.5,"labelPos":0.5,"bend":{"x":1200,"y":820},"_segs":[18,517.991943359375,145.5504028320313,2,18],"_segsTotal":701.5423461914063,"_segsFor":[{"x":664.008056640625,"y":962.3504028320312},{"x":682.008056640625,"y":962.3504028320312},{"x":1200,"y":962.3504028320312},{"x":1200,"y":816.8},{"x":1198,"y":816.8},{"x":1180,"y":816.8}]},{"id":"p5e4ef1","type":"solid","from":{"cid":"cky5j1k","port":"fuel"},"to":{"cid":"c5tli5c","port":"inlet"},"label":"氧化锰","width":2.5,"labelPos":0.5,"_segs":[18,12,0.13861083984375,12,18],"_segsTotal":60.13861083984375,"_segsFor":[{"x":1180,"y":779},{"x":1198,"y":779},{"x":1210,"y":779},{"x":1210,"y":778.8613891601562},{"x":1222,"y":778.8613891601562},{"x":1240,"y":778.8613891601562}]},{"id":"pu17jwl","type":"solid","from":{"cid":"c5tli5c","port":"airIn"},"to":{"cid":"ceq4k9q","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,3.13861083984375,42.664172363281295,3.13861083984375,18],"_segsTotal":84.9413940429688,"_segsFor":[{"x":1551.8971313476563,"y":857.7227783203125},{"x":1551.8971313476563,"y":875.7227783203125},{"x":1551.8971313476563,"y":878.8613891601562},{"x":1509.232958984375,"y":878.8613891601562},{"x":1509.232958984375,"y":882},{"x":1509.232958984375,"y":900}]},{"id":"pgkglyf","type":"cool","from":{"cid":"c5tli5c","port":"airOut"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1220,"y":360},"_segs":[18,322,121.62534179687509,2,18],"_segsTotal":481.6253417968751,"_segsFor":[{"x":1274.6552368164062,"y":700},{"x":1274.6552368164062,"y":682},{"x":1274.6552368164062,"y":360},{"x":1396.2805786132812,"y":360},{"x":1396.2805786132812,"y":362},{"x":1396.2805786132812,"y":380}]},{"id":"p33vqz6","type":"cool","from":{"cid":"cqxvh8j","port":"overflow"},"to":{"cid":"cva5r78","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1420,"y":420},"_segs":[18,90.5611572265625,13.128707885742188,122,18],"_segsTotal":261.6898651123047,"_segsFor":[{"x":1492.5611572265625,"y":428},{"x":1510.5611572265625,"y":428},{"x":1420,"y":428},{"x":1420,"y":414.8712921142578},{"x":1542,"y":414.8712921142578},{"x":1560,"y":414.8712921142578}]},{"id":"p9qftun","type":"cool","from":{"cid":"cqxvh8j","port":"overflow"},"to":{"cid":"cs6c3nk","port":"in"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1420,"y":460},"_segs":[18,90.5611572265625,26.871292114257812,122,18],"_segsTotal":275.4324493408203,"_segsFor":[{"x":1492.5611572265625,"y":428},{"x":1510.5611572265625,"y":428},{"x":1420,"y":428},{"x":1420,"y":454.8712921142578},{"x":1542,"y":454.8712921142578},{"x":1560,"y":454.8712921142578}]},{"id":"pyw4kkt","type":"cool","from":{"cid":"cva5r78","port":"out"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1580,"y":340},"_segs":[18,44.450439453125,52.87129211425781,183.71942138671875,18],"_segsTotal":317.04115295410156,"_segsFor":[{"x":1606.450439453125,"y":414.8712921142578},{"x":1624.450439453125,"y":414.8712921142578},{"x":1580,"y":414.8712921142578},{"x":1580,"y":362},{"x":1396.2805786132812,"y":362},{"x":1396.2805786132812,"y":380}]},{"id":"pu003ij","type":"cool","from":{"cid":"cs6c3nk","port":"out"},"to":{"cid":"cqxvh8j","port":"inlet"},"label":"","width":2.5,"labelPos":0.5,"bend":{"x":1580,"y":360},"_segs":[18,44.450439453125,92.87129211425781,183.71942138671875,18],"_segsTotal":357.04115295410156,"_segsFor":[{"x":1606.450439453125,"y":454.8712921142578},{"x":1624.450439453125,"y":454.8712921142578},{"x":1580,"y":454.8712921142578},{"x":1580,"y":362},{"x":1396.2805786132812,"y":362},{"x":1396.2805786132812,"y":380}]},{"id":"p3xhayi","type":"cool","from":{"cid":"cqxvh8j","port":"outlet"},"to":{"cid":"cp0llhp","port":"in"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,37.823036193847656,166.94464111328125,37.823036193847656,18],"_segsTotal":278.59071350097656,"_segsFor":[{"x":1396.2805786132812,"y":500},{"x":1396.2805786132812,"y":518},{"x":1396.2805786132812,"y":555.8230361938477},{"x":1563.2252197265625,"y":555.8230361938477},{"x":1563.2252197265625,"y":593.6460723876953},{"x":1563.2252197265625,"y":611.6460723876953}]},{"id":"pzaf7y1","type":"cool","from":{"cid":"cqxvh8j","port":"outlet"},"to":{"cid":"cjeo19x","port":"in"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,37.823036193847656,246.94464111328125,37.823036193847656,18],"_segsTotal":358.59071350097656,"_segsFor":[{"x":1396.2805786132812,"y":500},{"x":1396.2805786132812,"y":518},{"x":1396.2805786132812,"y":555.8230361938477},{"x":1643.2252197265625,"y":555.8230361938477},{"x":1643.2252197265625,"y":593.6460723876953},{"x":1643.2252197265625,"y":611.6460723876953}]},{"id":"p64r835","type":"cool","from":{"cid":"cjeo19x","port":"out"},"to":{"cid":"c5tli5c","port":"outlet"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,51.38243865966797,38.6728515625,51.38243865966797,18],"_segsTotal":177.43772888183594,"_segsFor":[{"x":1643.2252197265625,"y":658.0965118408203},{"x":1643.2252197265625,"y":676.0965118408203},{"x":1643.2252197265625,"y":727.4789505004883},{"x":1604.5523681640625,"y":727.4789505004883},{"x":1604.5523681640625,"y":778.8613891601562},{"x":1586.5523681640625,"y":778.8613891601562}]},{"id":"pfdns33","type":"cool","from":{"cid":"cp0llhp","port":"out"},"to":{"cid":"c5tli5c","port":"outlet"},"label":"","width":2.5,"labelPos":0.5,"_segs":[18,51.38243865966797,41.3271484375,51.38243865966797,18],"_segsTotal":180.09202575683594,"_segsFor":[{"x":1563.2252197265625,"y":658.0965118408203},{"x":1563.2252197265625,"y":676.0965118408203},{"x":1563.2252197265625,"y":727.4789505004883},{"x":1604.5523681640625,"y":727.4789505004883},{"x":1604.5523681640625,"y":778.8613891601562},{"x":1586.5523681640625,"y":778.8613891601562}]},{"id":"pabn3nr","type":"solid","from":{"cid":"cnso1vn","port":"outlet"},"to":{"cid":"cxi7c5v","port":"left"},"label":"煤粉","width":2.5,"labelPos":0.5,"straight":true,"_segs":[126.2406680738622],"_segsTotal":126.2406680738622,"_segsFor":[{"x":401.18487548828125,"y":517.8996276855469},{"x":400,"y":644.1347351074219}]},{"id":"p9wu343","type":"hot","from":{"cid":"c8cg5i4","port":"out"},"to":{"cid":"cky5j1k","port":"outlet"},"label":"热气","width":2.5,"labelPos":0.5,"bend":{"x":1200,"y":820},"straight":false,"_segs":[18,525.3074645996094,45.22585815429693,2,18],"_segsTotal":608.5333227539063,"_segsFor":[{"x":656.6925354003906,"y":862.0258581542969},{"x":674.6925354003906,"y":862.0258581542969},{"x":1200,"y":862.0258581542969},{"x":1200,"y":816.8},{"x":1198,"y":816.8},{"x":1180,"y":816.8}]},{"id":"p5pn9sa","type":"gas","from":{"cid":"c4ndpuc","port":"out"},"to":{"cid":"c8cg5i4","port":"out"},"label":"大气","width":2.5,"labelPos":0.5,"_segs":[18,170,0,170,18],"_segsTotal":376,"_segsFor":[{"x":316.6925354003906,"y":862.0258581542969},{"x":334.6925354003906,"y":862.0258581542969},{"x":504.6925354003906,"y":862.0258581542969},{"x":504.6925354003906,"y":862.0258581542969},{"x":674.6925354003906,"y":862.0258581542969},{"x":656.6925354003906,"y":862.0258581542969}]},{"id":"pm5xhr6","type":"gas","from":{"cid":"c5tli5c","port":"inlet"},"to":{"cid":"c20cki6","port":"in"},"label":"大气","width":2.5,"labelPos":0.5,"straight":true,"_segs":[248.37977888255213],"_segsTotal":248.37977888255213,"_segsFor":[{"x":1240,"y":778.8613891601562},{"x":1237.922607421875,"y":530.4902978515624}]},{"id":"pl24xes","type":"gas","from":{"cid":"c20cki6","port":"out"},"to":{"cid":"c6gegab","port":"bottom"},"label":"","width":2.5,"labelPos":0.5,"straight":true,"_segs":[78.9857389709371],"_segsTotal":78.9857389709371,"_segsFor":[{"x":1207.8028515625,"y":500},{"x":1211.3089904785156,"y":421.0921173095703}]}],"meta":{"title":"未命名流程","bg":"#070612"}};try{window.PFDEmbed.load(d)}catch(e){console.error("Standalone load error:",e);setTimeout(function(){try{window.PFDEmbed.load(d)}catch(e2){console.error("Retry failed:",e2)}},100)}var t=(d.meta&&d.meta.title)||"PFD";if(document.getElementById("docTitle"))document.getElementById("docTitle").textContent=t;document.title=t+" · 预览";})()</script></body>
 </html>

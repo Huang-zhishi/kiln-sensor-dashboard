@@ -33,6 +33,12 @@ export default function ProcessPage() {
 
   const current = systems.find((s) => s.id === active);
 
+  // 流程图被放在 /imports/ 子目录下，相对路径 '.' 会解析到 /imports/api/*（错误）。
+  // 因此：apiBaseUrl 为空或旧值 '.' 时统一视为同源（不带 ?api，HTML 内部会回退到 ''）。
+  const iframeSrc = current
+    ? `${current.file}${current.apiBaseUrl && current.apiBaseUrl !== '.' ? `?api=${current.apiBaseUrl}` : ''}`
+    : '';
+
   const handleDelete = useCallback(async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm('确定删除该工艺流程？')) return;
@@ -145,7 +151,7 @@ export default function ProcessPage() {
         {current && (
           <iframe
             ref={iframeRef}
-            src={`${current.file}?api=${current.apiBaseUrl}`}
+            src={iframeSrc}
             className="absolute inset-0 w-full h-full border-0"
             style={{ background: '#0a0e1a' }}
             title={current.name}
