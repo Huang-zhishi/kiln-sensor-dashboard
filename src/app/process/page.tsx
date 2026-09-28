@@ -88,8 +88,8 @@ export default function ProcessPage() {
   return (
     <div className="flex flex-col h-screen bg-[#0a0e1a]">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: 'rgba(0,212,255,0.15)' }}>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 sm:px-4 py-2 border-b" style={{ borderColor: 'rgba(0,212,255,0.15)' }}>
+        <div className="flex items-center gap-2 sm:gap-4">
           <Link
             href="/"
             className="px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2 hover:bg-cyan-500/20"
@@ -109,7 +109,7 @@ export default function ProcessPage() {
           </h1>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {systems.map((sys) => (
             <div key={sys.id} className="relative group">
               <button

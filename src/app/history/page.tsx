@@ -306,51 +306,36 @@ export default function HistoryPage() {
       <div className="signal-line" aria-hidden="true" />
 
       {/* 顶部栏 */}
-      <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 min-w-0">
-          <Link
-            href="/"
-            className="flex items-center gap-2 px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-          >
+      <header className="border-b border-border bg-card px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+          <Link href="/" className="nav-btn">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
             返回首页
           </Link>
-          <h1 className="text-lg font-semibold text-foreground truncate">测点历史查询</h1>
+          <h1 className="text-base sm:text-lg font-semibold text-foreground truncate">测点历史查询</h1>
           <span className="text-xs text-muted-foreground hidden sm:inline">
             选择单个测点与时间段，查看历史趋势
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/alerts"
-            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-          >
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Link href="/alerts" className="nav-btn">
             告警中心
           </Link>
-          <Link
-            href="/reports"
-            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-          >
+          <Link href="/reports" className="nav-btn">
             报表中心
           </Link>
-          <Link
-            href="/tags"
-            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-          >
+          <Link href="/tags" className="nav-btn">
             测点主数据
           </Link>
-          <Link
-            href="/sensors"
-            className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-          >
+          <Link href="/sensors" className="nav-btn">
             传感器总览
           </Link>
         </div>
       </header>
 
-      <main className="flex-1 p-4 space-y-3">
+      <main className="flex-1 p-3 sm:p-4 space-y-3">
         {/* 查询条件 */}
         <div className="panel p-4">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-end">
@@ -535,7 +520,7 @@ export default function HistoryPage() {
                     {showTable ? '收起数据明细' : `展开数据明细（${points.length} 条）`}
                   </button>
                   {showTable && (
-                    <div className="mt-2 max-h-72 overflow-y-auto rounded border border-border">
+                    <div className="mt-2 max-h-72 overflow-auto rounded border border-border">
                       <table className="w-full text-xs">
                         <thead className="sticky top-0 bg-card">
                           <tr className="text-muted-foreground">

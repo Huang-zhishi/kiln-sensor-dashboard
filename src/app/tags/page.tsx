@@ -220,12 +220,12 @@ export default function TagsPage() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <div className="signal-line" aria-hidden="true" />
 
-      <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 min-w-0">
-          <Link href="/" className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm transition-colors">
+      <header className="border-b border-border bg-card px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+          <Link href="/" className="nav-btn">
             返回首页
           </Link>
-          <h1 className="text-lg font-semibold">测点主数据</h1>
+          <h1 className="text-base sm:text-lg font-semibold">测点主数据</h1>
           <span className="text-xs text-muted-foreground">
             共 <b className="text-foreground">{counts.all}</b>
             <span className="ml-2">· 已配置 {counts.configured}</span>
@@ -239,7 +239,7 @@ export default function TagsPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索测点…"
-          className="bg-card border border-border-strong rounded px-2 py-1 text-xs w-52 focus:outline-none focus:border-primary"
+          className="bg-card border border-border-strong rounded px-2 py-1 text-xs w-full sm:w-52 focus:outline-none focus:border-primary"
         />
       </header>
 
@@ -272,7 +272,7 @@ export default function TagsPage() {
 
       {msg && <div className="mx-4 mt-2 panel px-4 py-2 text-xs text-muted-foreground">{msg}</div>}
 
-      <main className="flex-1 p-4 overflow-hidden">
+      <main className="flex-1 p-3 sm:p-4 overflow-hidden">
         {loading ? (
           <div className="empty-state h-[400px]"><span className="text-sm">加载中…</span></div>
         ) : (

@@ -98,6 +98,63 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* 移动端基础：避免 iOS 自动缩放字号、去掉点击高亮/300ms 延迟 */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+a,
+button,
+select,
+input,
+label {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 可横向滚动的容器（宽表格/长导航在小屏横向滑动，不被裁剪） */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* 移动端顶栏导航按钮：紧凑、不换行可横滑 */
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  font-size: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  color: var(--foreground);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
+.nav-btn:hover {
+  background: var(--card-hover);
+}
+
+/* 移动端：表单控件字号提到 16px，避免 iOS Safari 聚焦时自动放大页面 */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+@media (min-width: 640px) {
+  .nav-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+}
+
 /* ===== 视觉签名：顶部信号迹线 ===== */
 .signal-line {
   position: relative;

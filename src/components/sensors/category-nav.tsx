@@ -21,6 +21,8 @@ interface CategoryNavProps {
   active: SensorType | 'all';
   onChange: (type: SensorType | 'all') => void;
   offlineCount?: number;
+  /** 横向排布（移动端顶部分类条），默认纵向侧栏 */
+  horizontal?: boolean;
 }
 
 const TYPE_ICONS: Record<SensorType, LucideIcon> = {
@@ -36,7 +38,7 @@ const TYPE_ICONS: Record<SensorType, LucideIcon> = {
   '其他': CircleDot,
 };
 
-export function CategoryNav({ counts, active, onChange, offlineCount = 0 }: CategoryNavProps) {
+export function CategoryNav({ counts, active, onChange, offlineCount = 0, horizontal = false }: CategoryNavProps) {
   const totalOnline = Object.values(counts).reduce((a, b) => a + b, 0);
 
   const itemCls = (isActive: boolean) =>
@@ -45,6 +47,38 @@ export function CategoryNav({ counts, active, onChange, offlineCount = 0 }: Cate
         ? 'bg-muted/60 text-foreground border-primary'
         : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground border-transparent'
     }`;
+
+  // 移动端：横排可滑动分类条（竖向侧栏在小屏占宽过大）
+  if (horizontal) {
+    const chipCls = (isActive: boolean) =>
+      `flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border whitespace-nowrap transition-colors shrink-0 ${
+        isActive
+          ? 'bg-primary/15 border-primary text-foreground'
+          : 'border-border-strong text-muted-foreground hover:text-foreground'
+      }`;
+    return (
+      <div className="scroll-x flex items-center gap-1.5 px-3 py-2 border-b border-border bg-card">
+        <button onClick={() => onChange('all')} className={chipCls(active === 'all')}>
+          全部<span className="tabular-nums opacity-60">{totalOnline}</span>
+        </button>
+        {SENSOR_TYPES.map((type) => {
+          const count = counts[type] || 0;
+          if (count === 0) return null;
+          const color = SENSOR_TYPE_COLORS[type];
+          const Icon = TYPE_ICONS[type];
+          return (
+            <button key={type} onClick={() => onChange(type)} className={chipCls(active === type)}>
+              <Icon className="w-3.5 h-3.5" style={{ color }} />
+              {type}<span className="tabular-nums opacity-60">{count}</span>
+            </button>
+          );
+        })}
+        {offlineCount > 0 && (
+          <span className="ml-auto pl-2 text-xs shrink-0" style={{ color: 'var(--danger)' }}>离线 {offlineCount}</span>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col bg-card border-r border-border">

@@ -112,8 +112,8 @@ export default function ImportPageContent() {
   return (
     <div className="flex flex-col h-screen bg-[#0a0e1a]">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b" style={{ borderColor: 'rgba(0,212,255,0.15)' }}>
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b" style={{ borderColor: 'rgba(0,212,255,0.15)' }}>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <Link
             href="/process"
             className="px-3 py-1.5 text-xs rounded transition-colors flex items-center gap-2 hover:bg-cyan-500/20"
@@ -135,9 +135,9 @@ export default function ImportPageContent() {
       </div>
 
       {/* Form */}
-      <div className="flex-1 overflow-auto p-8">
+      <div className="flex-1 overflow-auto p-4 sm:p-8">
         <div className="max-w-2xl mx-auto">
-          <div className="rounded-lg p-8" style={{
+          <div className="rounded-lg p-4 sm:p-8" style={{
             background: '#0f1729',
             border: '1px solid rgba(0, 212, 255, 0.15)',
           }}>

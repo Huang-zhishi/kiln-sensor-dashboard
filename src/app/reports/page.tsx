@@ -135,24 +135,24 @@ export default function ReportsPage() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <div className="signal-line" aria-hidden="true" />
 
-      <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 min-w-0">
-          <Link href="/" className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm transition-colors">
+      <header className="border-b border-border bg-card px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+          <Link href="/" className="nav-btn">
             返回首页
           </Link>
-          <h1 className="text-lg font-semibold">报表中心</h1>
+          <h1 className="text-base sm:text-lg font-semibold">报表中心</h1>
           {win && (
             <span className="text-xs text-muted-foreground">
               {win.label} · {fmt(win.start)} ~ {fmt(win.end)} · 测点 {totals.sensors} · 记录 {totals.records.toLocaleString()} · 告警 {totals.alerts}
             </span>
           )}
         </div>
-        <button onClick={exportCsv} disabled={!items.length} className="px-3 py-1.5 rounded text-sm bg-primary/20 border border-primary text-foreground hover:bg-primary/30 disabled:opacity-50">
+        <button onClick={exportCsv} disabled={!items.length} className="nav-btn bg-primary/20 border-primary hover:bg-primary/30 disabled:opacity-50">
           导出 CSV
         </button>
       </header>
 
-      <main className="flex-1 p-4 space-y-3 overflow-hidden">
+      <main className="flex-1 p-3 sm:p-4 space-y-3 overflow-hidden">
         <div className="panel p-4 flex flex-wrap items-end gap-3">
           <div>
             <div className="text-xs text-muted-foreground mb-1">周期</div>

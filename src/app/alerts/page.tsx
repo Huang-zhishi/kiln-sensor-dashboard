@@ -264,19 +264,19 @@ export default function AlertsPage() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <div className="signal-line" aria-hidden="true" />
 
-      <header className="border-b border-border bg-card px-6 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4 min-w-0">
-          <Link href="/" className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm transition-colors">
+      <header className="border-b border-border bg-card px-3 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 min-w-0">
+          <Link href="/" className="nav-btn">
             返回首页
           </Link>
-          <h1 className="text-lg font-semibold">告警中心</h1>
+          <h1 className="text-base sm:text-lg font-semibold">告警中心</h1>
           <span className="text-xs text-muted-foreground">
             活动 <b style={{ color: activeCount ? 'var(--danger)' : 'var(--success)' }}>{activeCount}</b>
             {p1Count > 0 && <span className="ml-2" style={{ color: 'var(--danger)' }}>· P1 {p1Count}</span>}
             <span className="ml-2">· 规则 {rules.length}</span>
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {(['active', 'history', 'rules', 'closedloop'] as const).map((t) => (
             <button
               key={t}
@@ -355,7 +355,7 @@ export default function AlertsPage() {
           </div>
         ) : tab === 'history' ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {([['', '全部'], ['rule', '规则告警'], ['anomaly', '极值异常']] as const).map(([k, l]) => (
                 <button
                   key={k}
@@ -370,7 +370,7 @@ export default function AlertsPage() {
               <span className="text-xs text-muted-foreground ml-2">{filteredItems.length} 条</span>
             </div>
           <div className="panel overflow-hidden">
-            <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
+            <div className="max-h-[calc(100vh-200px)] overflow-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card text-muted-foreground">
                   <tr>
@@ -519,7 +519,7 @@ export default function AlertsPage() {
 
             {/* 规则列表 */}
             <div className="panel overflow-hidden xl:col-span-2">
-              <div className="max-h-[calc(100vh-160px)] overflow-y-auto">
+              <div className="max-h-[calc(100vh-160px)] overflow-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-card text-muted-foreground">
                     <tr>

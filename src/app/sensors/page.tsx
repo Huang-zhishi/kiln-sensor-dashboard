@@ -167,9 +167,9 @@ export default function SensorsPage() {
       {/* 视觉签名：信号迹线 */}
       <div className="signal-line" aria-hidden="true" />
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* 左侧分类导航 */}
-        <div className="w-[210px] flex-shrink-0">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+        {/* 左侧分类导航（桌面端） */}
+        <div className="hidden md:block w-[210px] flex-shrink-0">
           <CategoryNav
             counts={typeCounts}
             active={activeType}
@@ -178,50 +178,46 @@ export default function SensorsPage() {
           />
         </div>
 
+        {/* 移动端：横排分类条 */}
+        <div className="md:hidden shrink-0">
+          <CategoryNav
+            counts={typeCounts}
+            active={activeType}
+            onChange={setActiveType}
+            offlineCount={offlineCount}
+            horizontal
+          />
+        </div>
+
         {/* 右侧主内容区 */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* 顶部栏 */}
-          <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-card">
-            <div className="flex items-center gap-4 min-w-0">
-              <Link
-                href="/"
-                className="flex items-center gap-2 px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-              >
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 sm:px-6 py-2 sm:py-3 border-b border-border bg-card">
+            <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-4 gap-y-1 min-w-0">
+              <Link href="/" className="nav-btn">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
                 返回首页
               </Link>
 
-              <Link
-                href="/history"
-                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-              >
+              <Link href="/history" className="nav-btn">
                 历史查询
               </Link>
 
-              <Link
-                href="/alerts"
-                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-              >
+              <Link href="/alerts" className="nav-btn">
                 告警中心
               </Link>
 
-              <Link
-                href="/reports"
-                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-              >
+              <Link href="/reports" className="nav-btn">
                 报表中心
               </Link>
 
-              <Link
-                href="/tags"
-                className="px-3 py-1.5 bg-card hover:bg-card-hover border border-border-strong rounded text-sm text-foreground transition-colors flex-shrink-0"
-              >
+              <Link href="/tags" className="nav-btn">
                 测点主数据
               </Link>
 
-              <h1 className="text-lg font-semibold text-foreground truncate">
+              <h1 className="text-base sm:text-lg font-semibold text-foreground truncate">
                 {activeType === 'all' ? '全部传感器' : activeType}
               </h1>
               <span className="text-sm text-muted-foreground flex-shrink-0">
@@ -232,7 +228,7 @@ export default function SensorsPage() {
               </span>
             </div>
 
-            <div className="flex items-center gap-4 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4">
               {/* 连接状态 */}
               <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 <span className={`status-dot ${connected ? 'online' : 'offline'}`} style={{ width: 7, height: 7 }} />

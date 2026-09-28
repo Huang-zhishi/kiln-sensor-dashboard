@@ -247,7 +247,7 @@ export default function DashboardPage() {
       {loading && latestData.length === 0 ? (
         <DashboardSkeleton />
       ) : (
-        <div className="px-4 pb-6 space-y-3">
+        <div className="px-3 sm:px-4 pb-4 sm:pb-6 space-y-3">
           <FilterBar
             filters={filters}
             onFilterChange={setFilters}
