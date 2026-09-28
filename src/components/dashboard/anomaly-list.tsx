@@ -246,6 +246,8 @@ export function AnomalyList({
               const s = DIRECTION_STYLE[a.direction] || { color: 'var(--warning)', label: a.direction || '异常' };
               const active = selectedKey === a.event_key;
               const acked = a.status === 'acked';
+              // 已处理 → 整行改用绿色，直观区分未处理项
+              const accent = acked ? 'var(--success)' : s.color;
               const unit = UNIT_MAP[classifySensor(a.sensor_tag)];
               return (
                 <div
@@ -266,25 +268,30 @@ export function AnomalyList({
                     className="w-full h-full text-left rounded px-3 py-2 transition-colors hover:bg-card-hover"
                     style={{
                       background: active
-                        ? `color-mix(in srgb, ${s.color} 12%, transparent)`
-                        : `color-mix(in srgb, ${s.color} 6%, transparent)`,
-                      border: `1px solid color-mix(in srgb, ${s.color} ${active ? '45%' : '20%'}, transparent)`,
-                      opacity: acked ? 0.72 : 1,
+                        ? `color-mix(in srgb, ${accent} 12%, transparent)`
+                        : `color-mix(in srgb, ${accent} 6%, transparent)`,
+                      border: `1px solid color-mix(in srgb, ${accent} ${active ? '45%' : '20%'}, transparent)`,
                     }}
                   >
                     <div className="flex items-center justify-between gap-2 h-full">
                       <div className="min-w-0">
-                        <div className="text-xs font-medium truncate flex items-center gap-1.5" style={{ color: s.color }}>
-                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: s.color }} />
+                        <div className="text-xs font-medium truncate flex items-center gap-1.5" style={{ color: accent }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: accent }} />
                           {a.sensor_tag}
                           <span
                             className="text-[9px] px-1 rounded flex-shrink-0"
-                            style={{ background: `color-mix(in srgb, ${s.color} 18%, transparent)` }}
+                            style={{ background: `color-mix(in srgb, ${accent} 18%, transparent)` }}
                           >
                             {s.label}
                           </span>
                           {acked && (
-                            <span className="text-[9px] px-1 rounded flex-shrink-0 text-muted-foreground border border-border">
+                            <span
+                              className="text-[9px] px-1 rounded flex-shrink-0"
+                              style={{
+                                color: 'var(--success)',
+                                border: '1px solid color-mix(in srgb, var(--success) 45%, transparent)',
+                              }}
+                            >
                               已处理
                             </span>
                           )}
@@ -311,7 +318,7 @@ export function AnomalyList({
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <div className="font-mono font-bold text-sm tabular-nums" style={{ color: s.color }}>
+                        <div className="font-mono font-bold text-sm tabular-nums" style={{ color: accent }}>
                           {Number(a.sensor_value).toFixed(2)}
                         </div>
                         <div className="text-[10px] text-muted-foreground">{unit}</div>
