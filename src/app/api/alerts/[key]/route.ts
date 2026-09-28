@@ -4,7 +4,7 @@
 // POST  /api/alerts/[key]  body: { action:'resend' }
 
 import { NextResponse } from 'next/server';
-import { fetchAlertEventByKey, fetchAlertAcks, writeAlertAck, escapeSql } from '@/lib/alert-store';
+import { fetchAlertEventByKey, fetchAlertAcks, fetchAckTimeline, writeAlertAck, escapeSql } from '@/lib/alert-store';
 import { query, toRows } from '@/lib/db';
 import { sendWecomMessage } from '@/lib/alert-engine';
 
@@ -23,7 +23,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ key: st
     const event = await fetchAlertEventByKey(eventKey);
     if (!event) return NextResponse.json({ success: false, error: 'not found' }, { status: 404 });
     const acks = await fetchAlertAcks();
-    return NextResponse.json({ success: true, event, ack: acks.get(eventKey) ?? null });
+    let timeline: Array<Record<string, unknown>> = [];
+    try {
+      timeline = await fetchAckTimeline(eventKey);
+    } catch {
+      // 时间线读取失败不影响详情
+    }
+    return NextResponse.json({ success: true, event, ack: acks.get(eventKey) ?? null, timeline });
   } catch (err) {
     return NextResponse.json({ success: false, error: err instanceof Error ? err.message : '查询失败' }, { status: 500 });
   }
@@ -34,7 +40,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ key: s
   if (!eventKey || eventKey.length > 200) {
     return NextResponse.json({ success: false, error: 'invalid key' }, { status: 400 });
   }
-  let body: { status?: string; handler?: string; comment?: string; root_cause?: string; device_id?: string } = {};
+  let body: {
+    status?: string;
+    handler?: string;
+    comment?: string;
+    root_cause?: string;
+    root_cause_category?: string;
+    measure?: string;
+    device_id?: string;
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -62,6 +76,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ key: s
       handler: (body.handler || '').slice(0, 64),
       comment: (body.comment || '').slice(0, 500),
       rootCause: (body.root_cause || '').slice(0, 255),
+      rootCauseCategory: (body.root_cause_category || '').slice(0, 32),
+      measure: (body.measure || '').slice(0, 500),
     });
     return NextResponse.json({ success: true, event_key: eventKey, status: body.status === 'acked' ? 'acked' : 'new' });
   } catch (err) {

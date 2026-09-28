@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { EChartsOption } from 'echarts';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { EChart } from '@/components/charts/echarts';
 import { AnomalyMarkdown } from './anomaly-markdown';
 import { classifySensor, UNIT_MAP } from '@/lib/sensor-classifier';
+import { ROOT_CAUSE_CATEGORIES, categoryLabel, categoryColor } from '@/lib/handling-constants';
 import type { AnomalyItem } from './anomaly-list';
 
 interface AnomalyDetailDrawerProps {
@@ -16,6 +17,29 @@ interface AnomalyDetailDrawerProps {
   onStatusChange?: (eventKey: string, status: 'acked' | 'new') => void;
   agentChatUrl?: string;
 }
+
+interface AckData {
+  status: 'acked' | 'new';
+  handler: string;
+  comment: string;
+  rootCause: string;
+  rootCauseCategory: string;
+  measure: string;
+  ackedAt: string | null;
+}
+
+interface TimelineRecord {
+  ts: string;
+  status: 'acked' | 'new';
+  handler: string;
+  comment: string;
+  rootCause: string;
+  rootCauseCategory: string;
+  measure: string;
+}
+
+const EMPTY_FORM = { handler: '', rootCauseCategory: '', rootCause: '', measure: '', comment: '' };
+const HANDLER_KEY = 'pfd_last_handler';
 
 const DIRECTION_LABEL: Record<string, string> = {
   NEW_HIGH: '突破历史最高值',
@@ -46,42 +70,69 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'acked' | 'new'>('new');
+  const [ack, setAck] = useState<AckData | null>(null);
+  const [timeline, setTimeline] = useState<TimelineRecord[]>([]);
+  const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
   const [trendPoints, setTrendPoints] = useState<Array<{ ts: string; sensor_value: number }>>([]);
   const [reference, setReference] = useState<{ mn: number; mx: number; av: number } | null>(null);
+  const loadedHandlersRef = useRef(false);
+
+  // 记住上次处理人，每次打开时预填，减少重复输入
+  useEffect(() => {
+    if (loadedHandlersRef.current) return;
+    loadedHandlersRef.current = true;
+    try {
+      const h = localStorage.getItem(HANDLER_KEY);
+      if (h) setForm((f) => ({ ...f, handler: h }));
+    } catch {
+      // localStorage 不可用时忽略
+    }
+  }, []);
+
+  const loadDetail = useCallback(async () => {
+    if (!eventKey) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/anomalies/${encodeURIComponent(eventKey)}`);
+      const j = await r.json();
+      if (!j.success) {
+        setError(j.error || '加载失败');
+        return;
+      }
+      setDetail(j.item as Record<string, unknown>);
+      setStatus(j.item?.status === 'acked' ? 'acked' : 'new');
+      const a = (j.ack as AckData | null) || null;
+      setAck(a);
+      setTimeline(Array.isArray(j.timeline) ? (j.timeline as TimelineRecord[]) : []);
+      setForm((prev) => ({
+        handler: a?.handler || prev.handler || '',
+        rootCauseCategory: a?.rootCauseCategory || '',
+        rootCause: a?.rootCause || '',
+        measure: a?.measure || '',
+        comment: a?.comment || '',
+      }));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [eventKey]);
 
   useEffect(() => {
     if (!eventKey) {
       setDetail(null);
       setError(null);
       setTrendPoints([]);
+      setAck(null);
+      setTimeline([]);
+      setForm({ ...EMPTY_FORM });
       return;
     }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setTrendPoints([]);
-    fetch(`/api/anomalies/${encodeURIComponent(eventKey)}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancelled) return;
-        if (j.success) {
-          setDetail(j.item as Record<string, unknown>);
-          setStatus(j.item?.status === 'acked' ? 'acked' : 'new');
-        } else {
-          setError(j.error || '加载失败');
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [eventKey]);
+    void loadDetail();
+  }, [eventKey, loadDetail]);
 
   const item = (detail || summary) as Record<string, unknown> | null | undefined;
   const sensorTag = String(item?.sensor_tag || '');
@@ -119,23 +170,42 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
     };
   }, [sensorTag]);
 
-  const toggleAck = async () => {
+  const submitHandling = async (nextStatus: 'acked' | 'new') => {
     if (!eventKey || saving) return;
-    const next: 'acked' | 'new' = status === 'acked' ? 'new' : 'acked';
     setSaving(true);
+    setSaveMsg('');
     try {
       const r = await fetch(`/api/anomalies/${encodeURIComponent(eventKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: next, device_id: String((detail || summary)?.device_id || '') }),
+        body: JSON.stringify({
+          status: nextStatus,
+          device_id: String((detail || summary)?.device_id || ''),
+          handler: form.handler,
+          root_cause_category: form.rootCauseCategory,
+          root_cause: form.rootCause,
+          measure: form.measure,
+          comment: form.comment,
+        }),
       });
       const j = await r.json();
-      if (j.success) {
-        setStatus(next);
-        onStatusChange?.(eventKey, next);
+      if (!j.success) {
+        setSaveMsg(j.error || '保存失败');
+        return;
       }
+      if (nextStatus === 'acked' && form.handler.trim()) {
+        try {
+          localStorage.setItem(HANDLER_KEY, form.handler.trim());
+        } catch {
+          // ignore
+        }
+      }
+      setStatus(nextStatus);
+      onStatusChange?.(eventKey, nextStatus);
+      setSaveMsg(nextStatus === 'acked' ? '已保存处理记录' : '已取消处理');
+      await loadDetail();
     } catch {
-      // 失败保持原状
+      setSaveMsg('保存失败，请重试');
     } finally {
       setSaving(false);
     }
@@ -306,6 +376,162 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
               )}
             </section>
 
+            {/* 处理闭环 */}
+            <section>
+              <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-2">
+                处理闭环
+                {ack?.ackedAt && status === 'acked' && (
+                  <span className="normal-case font-normal text-muted-foreground">
+                    · {fmtTime(ack.ackedAt)}
+                  </span>
+                )}
+              </div>
+
+              {/* 当前处理信息 */}
+              {status === 'acked' && ack && (
+                <div
+                  className="rounded p-3 mb-2 space-y-1.5 text-[11px]"
+                  style={{ background: 'color-mix(in srgb, var(--success) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 24%, transparent)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span style={{ color: 'var(--success)' }}>已处理</span>
+                    <span className="text-muted-foreground">处理人：{ack.handler || '未填写'}</span>
+                    {ack.rootCauseCategory && (
+                      <span
+                        className="px-1.5 py-0.5 rounded"
+                        style={{ background: `color-mix(in srgb, ${categoryColor(ack.rootCauseCategory)} 18%, transparent)`, color: categoryColor(ack.rootCauseCategory) }}
+                      >
+                        {categoryLabel(ack.rootCauseCategory)}
+                      </span>
+                    )}
+                  </div>
+                  {ack.rootCause && <div>根因：{ack.rootCause}</div>}
+                  {ack.measure && <div>措施：{ack.measure}</div>}
+                  {ack.comment && <div className="text-muted-foreground">备注：{ack.comment}</div>}
+                </div>
+              )}
+
+              {/* 处理表单 */}
+              <div className="rounded p-3 space-y-2 text-[11px]" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-muted-foreground">处理人</span>
+                    <input
+                      value={form.handler}
+                      onChange={(e) => setForm((f) => ({ ...f, handler: e.target.value }))}
+                      placeholder="姓名 / 工号"
+                      className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground text-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-muted-foreground">根因分类</span>
+                    <select
+                      value={form.rootCauseCategory}
+                      onChange={(e) => setForm((f) => ({ ...f, rootCauseCategory: e.target.value }))}
+                      className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground text-xs"
+                    >
+                      <option value="">未分类</option>
+                      {ROOT_CAUSE_CATEGORIES.map((c) => (
+                        <option key={c.value} value={c.value}>{c.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="text-muted-foreground">根因说明</span>
+                  <input
+                    value={form.rootCause}
+                    onChange={(e) => setForm((f) => ({ ...f, rootCause: e.target.value }))}
+                    placeholder="如：热电偶接线松动导致跳变"
+                    className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground text-xs"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground">处理措施</span>
+                  <textarea
+                    value={form.measure}
+                    onChange={(e) => setForm((f) => ({ ...f, measure: e.target.value }))}
+                    rows={2}
+                    placeholder="如：紧固接线并复测，观察 30 分钟"
+                    className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground text-xs resize-none"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-muted-foreground">备注</span>
+                  <textarea
+                    value={form.comment}
+                    onChange={(e) => setForm((f) => ({ ...f, comment: e.target.value }))}
+                    rows={2}
+                    className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground text-xs resize-none"
+                  />
+                </label>
+                <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => submitHandling('acked')}
+                    disabled={saving}
+                    className="px-3 py-1.5 rounded text-xs font-medium disabled:opacity-60 transition-colors"
+                    style={{ border: '1px solid var(--success)', background: 'color-mix(in srgb, var(--success) 12%, transparent)', color: 'var(--success)' }}
+                  >
+                    {saving ? '保存中…' : status === 'acked' ? '更新处理记录' : '标记已处理'}
+                  </button>
+                  {status === 'acked' && (
+                    <button
+                      type="button"
+                      onClick={() => submitHandling('new')}
+                      disabled={saving}
+                      className="px-3 py-1.5 rounded text-xs border border-border-strong text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors"
+                    >
+                      取消已处理
+                    </button>
+                  )}
+                  {saveMsg && (
+                    <span className="text-[11px]" style={{ color: saveMsg.includes('失败') ? 'var(--danger)' : 'var(--success)' }}>
+                      {saveMsg}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 处理时间线 */}
+              {timeline.length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10px] text-muted-foreground mb-1.5">处理时间线（{timeline.length}）</div>
+                  <ol className="space-y-1.5">
+                    {timeline.map((t, i) => (
+                      <li key={`${t.ts}-${i}`} className="flex gap-2 text-[11px]">
+                        <span
+                          className="mt-1 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{ background: t.status === 'acked' ? 'var(--success)' : 'var(--warning)' }}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-muted-foreground">{fmtTime(t.ts)}</span>
+                            <span style={{ color: t.status === 'acked' ? 'var(--success)' : 'var(--warning)' }}>
+                              {t.status === 'acked' ? '已处理' : '取消/重开'}
+                            </span>
+                            {t.handler && <span>{t.handler}</span>}
+                            {t.rootCauseCategory && (
+                              <span className="px-1 rounded" style={{ color: categoryColor(t.rootCauseCategory), background: `color-mix(in srgb, ${categoryColor(t.rootCauseCategory)} 15%, transparent)` }}>
+                                {categoryLabel(t.rootCauseCategory)}
+                              </span>
+                            )}
+                          </div>
+                          {(t.rootCause || t.measure || t.comment) && (
+                            <div className="text-muted-foreground mt-0.5">
+                              {t.rootCause && <span>根因：{t.rootCause}　</span>}
+                              {t.measure && <span>措施：{t.measure}　</span>}
+                              {t.comment && <span>备注：{t.comment}</span>}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+            </section>
+
             {/* Agent 分析 */}
             <section>
               <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -331,19 +557,6 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
 
             {/* 操作 */}
             <section className="pt-1 flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={toggleAck}
-                disabled={saving}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-60"
-                style={
-                  status === 'acked'
-                    ? { border: '1px solid var(--border-strong)', background: 'var(--card)' }
-                    : { border: '1px solid var(--success)', background: 'color-mix(in srgb, var(--success) 12%, transparent)', color: 'var(--success)' }
-                }
-              >
-                {saving ? '处理中…' : status === 'acked' ? '取消已处理' : '标记已处理'}
-              </button>
               <Link
                 href="/sensors"
                 className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"

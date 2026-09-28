@@ -9,8 +9,8 @@
 
 import { NextResponse } from 'next/server';
 import { evaluateAlerts, ensureAlertEngine, getActiveAlerts, getLastEval } from '@/lib/alert-engine';
-import { fetchAlertEvents, fetchAlertAcks, type AlertAckRecord } from '@/lib/alert-store';
-import { fetchAcks as fetchAnomalyAcks } from '@/lib/anomaly-acks';
+import { fetchAlertEvents, type AlertAckRecord } from '@/lib/alert-store';
+import { fetchMergedAcks } from '@/lib/acks';
 import { loadRules } from '@/lib/alert-rules';
 import { query, toRows } from '@/lib/db';
 
@@ -45,17 +45,8 @@ export async function GET(request: Request) {
   let anomalyRows: Record<string, unknown>[] = [];
   let warning = '';
   try {
-    acks = await fetchAlertAcks();
-  } catch {
-    // ignore
-  }
-  try {
-    const anomalyAcks = await fetchAnomalyAcks();
-    for (const [k, v] of anomalyAcks) {
-      if (!acks.has(k)) {
-        acks.set(k, { status: v.status, handler: '', comment: '', rootCause: '', ackedAt: v.ackedAt });
-      }
-    }
+    // 统一处理记录（alert_acks 为准，anomaly_acks 兜底）
+    acks = await fetchMergedAcks();
   } catch {
     // ignore
   }

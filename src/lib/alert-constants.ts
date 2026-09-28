@@ -45,6 +45,10 @@ export interface AlertAck {
   handler: string;
   comment: string;
   rootCause: string;
+  /** 根因分类（结构化枚举值） */
+  rootCauseCategory: string;
+  /** 处理措施 */
+  measure: string;
   ackedAt: string | null;
 }
 

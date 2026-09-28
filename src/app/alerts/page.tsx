@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
 import { SensorPicker, type SensorOption } from '@/components/history/sensor-picker';
+import { ClosedLoopPanel } from '@/components/alerts/closed-loop-panel';
+import { ROOT_CAUSE_CATEGORIES } from '@/lib/handling-constants';
 import {
   ALERT_SEVERITIES,
   SEVERITY_LABEL,
@@ -79,7 +81,7 @@ const EMPTY_RULE: AlertRule = {
 };
 
 export default function AlertsPage() {
-  const [tab, setTab] = useState<'active' | 'history' | 'rules'>('active');
+  const [tab, setTab] = useState<'active' | 'history' | 'rules' | 'closedloop'>('active');
   const [sourceFilter, setSourceFilter] = useState<'' | 'rule' | 'anomaly'>('');
   const [active, setActive] = useState<ActiveAlert[]>([]);
   const [items, setItems] = useState<AlertEventItem[]>([]);
@@ -89,7 +91,7 @@ export default function AlertsPage() {
   const [error, setError] = useState('');
 
   const [selected, setSelected] = useState<Selection | null>(null);
-  const [proc, setProc] = useState({ handler: '', comment: '', rootCause: '' });
+  const [proc, setProc] = useState({ handler: '', comment: '', rootCause: '', rootCauseCategory: '', measure: '' });
   const [busy, setBusy] = useState(false);
 
   // 规则编辑
@@ -141,6 +143,8 @@ export default function AlertsPage() {
       handler: s.ack?.handler || '',
       comment: s.ack?.comment || '',
       rootCause: s.ack?.rootCause || '',
+      rootCauseCategory: s.ack?.rootCauseCategory || '',
+      measure: s.ack?.measure || '',
     });
   };
 
@@ -155,7 +159,15 @@ export default function AlertsPage() {
       await apiFetch(`/api/alerts/${encodeURIComponent(selected.eventKey)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'acked', ...proc, device_id: selected.deviceId }),
+        body: JSON.stringify({
+          status: 'acked',
+          device_id: selected.deviceId,
+          handler: proc.handler,
+          comment: proc.comment,
+          root_cause: proc.rootCause,
+          root_cause_category: proc.rootCauseCategory,
+          measure: proc.measure,
+        }),
       });
       setSelected(null);
       await reloadAll();
@@ -265,7 +277,7 @@ export default function AlertsPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {(['active', 'history', 'rules'] as const).map((t) => (
+          {(['active', 'history', 'rules', 'closedloop'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -273,7 +285,7 @@ export default function AlertsPage() {
                 tab === t ? 'bg-primary/15 border-primary text-foreground' : 'border-border-strong text-muted-foreground hover:text-foreground'
               }`}
             >
-              {t === 'active' ? '活动告警' : t === 'history' ? '历史告警' : '规则配置'}
+              {t === 'active' ? '活动告警' : t === 'history' ? '历史告警' : t === 'rules' ? '规则配置' : '闭环分析'}
             </button>
           ))}
         </div>
@@ -428,6 +440,8 @@ export default function AlertsPage() {
             </div>
           </div>
           </div>
+        ) : tab === 'closedloop' ? (
+          <ClosedLoopPanel />
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
             {/* 规则编辑 */}
@@ -580,8 +594,25 @@ export default function AlertsPage() {
                 <textarea value={proc.comment} onChange={(e) => setProc((p) => ({ ...p, comment: e.target.value }))} rows={3} className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground" />
               </label>
               <label className="block">
-                <span className="text-muted-foreground">根因</span>
+                <span className="text-muted-foreground">根因分类</span>
+                <select
+                  value={proc.rootCauseCategory}
+                  onChange={(e) => setProc((p) => ({ ...p, rootCauseCategory: e.target.value }))}
+                  className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground"
+                >
+                  <option value="">未分类</option>
+                  {ROOT_CAUSE_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-muted-foreground">根因说明</span>
                 <input value={proc.rootCause} onChange={(e) => setProc((p) => ({ ...p, rootCause: e.target.value }))} className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground" />
+              </label>
+              <label className="block">
+                <span className="text-muted-foreground">处理措施</span>
+                <textarea value={proc.measure} onChange={(e) => setProc((p) => ({ ...p, measure: e.target.value }))} rows={2} className="mt-1 w-full bg-background border border-border-strong rounded px-2 py-1.5 text-foreground resize-none" />
               </label>
             </div>
 

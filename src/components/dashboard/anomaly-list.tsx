@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { classifySensor, UNIT_MAP } from '@/lib/sensor-classifier';
+import { ROOT_CAUSE_CATEGORIES, categoryLabel, categoryColor } from '@/lib/handling-constants';
 
 export interface AnomalyItem {
   ts: string;
@@ -18,6 +19,11 @@ export interface AnomalyItem {
   note?: string;
   status?: 'acked' | 'new';
   acked_at?: string | null;
+  // 处理闭环（来自 alert_acks）
+  handler?: string;
+  root_cause?: string;
+  root_cause_category?: string;
+  measure?: string;
 }
 
 export interface AnomalyFilters {
@@ -68,7 +74,7 @@ const TIME_OPTIONS = [
 ];
 
 function exportCsv(items: AnomalyItem[]) {
-  const header = ['时间', '测点', '方向', '数值', '历史下限', '历史上限', '状态', '窑体', '设备'];
+  const header = ['时间', '测点', '方向', '数值', '历史下限', '历史上限', '状态', '处理人', '根因分类', '根因', '处理措施', '窑体', '设备'];
   const rows = items.map((a) => [
     fmtFull(a.ts),
     a.sensor_tag,
@@ -77,6 +83,10 @@ function exportCsv(items: AnomalyItem[]) {
     a.baseline_min,
     a.baseline_max,
     a.status === 'acked' ? '已处理' : '未处理',
+    a.handler || '',
+    categoryLabel(a.root_cause_category),
+    a.root_cause || '',
+    a.measure || '',
     a.kiln_id,
     a.device_id,
   ]);
@@ -109,12 +119,19 @@ export function AnomalyList({
     [items],
   );
 
+  // 根因分类筛选（客户端过滤：列表已含处理信息，无需重新请求）
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const visible = useMemo(
+    () => (categoryFilter ? sorted.filter((a) => (a.root_cause_category || '') === categoryFilter) : sorted),
+    [sorted, categoryFilter],
+  );
+
   const set = (patch: Partial<AnomalyFilters>) => onFiltersChange({ ...filters, ...patch });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // 虚拟滚动：异常记录可能很多，只渲染可视区行
   const virtualizer = useVirtualizer({
-    count: sorted.length,
+    count: visible.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_H,
     overscan: 8,
@@ -153,14 +170,14 @@ export function AnomalyList({
           )}
           <button
             type="button"
-            onClick={() => exportCsv(sorted)}
-            disabled={sorted.length === 0}
+            onClick={() => exportCsv(visible)}
+            disabled={visible.length === 0}
             className="text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
             title="导出当前筛选结果为 CSV"
           >
             导出CSV
           </button>
-          <span className="text-xs text-muted-foreground">{sorted.length} 条</span>
+          <span className="text-xs text-muted-foreground">{visible.length} 条</span>
         </span>
       </div>
 
@@ -195,17 +212,28 @@ export function AnomalyList({
             <option value="new">未处理</option>
             <option value="acked">已处理</option>
           </select>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-1.5 py-0.5 rounded text-[11px] bg-card border border-border text-foreground"
+            title="按根因分类筛选"
+          >
+            <option value="">全部根因</option>
+            {ROOT_CAUSE_CATEGORIES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3">
-        {loading && sorted.length === 0 ? (
+        {loading && visible.length === 0 ? (
           <div className="space-y-1.5">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-12 rounded bg-card-hover animate-pulse" />
             ))}
           </div>
-        ) : sorted.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="empty-state h-full">
             <span className="status-dot online" style={{ width: 10, height: 10 }} />
             <span className="text-sm">无异常记录</span>
@@ -214,7 +242,7 @@ export function AnomalyList({
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
             {virtualizer.getVirtualItems().map((vi) => {
-              const a = sorted[vi.index];
+              const a = visible[vi.index];
               const s = DIRECTION_STYLE[a.direction] || { color: 'var(--warning)', label: a.direction || '异常' };
               const active = selectedKey === a.event_key;
               const acked = a.status === 'acked';
@@ -260,9 +288,21 @@ export function AnomalyList({
                               已处理
                             </span>
                           )}
+                          {acked && a.root_cause_category && (
+                            <span
+                              className="text-[9px] px-1 rounded flex-shrink-0"
+                              style={{
+                                color: categoryColor(a.root_cause_category),
+                                background: `color-mix(in srgb, ${categoryColor(a.root_cause_category)} 15%, transparent)`,
+                              }}
+                            >
+                              {categoryLabel(a.root_cause_category)}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[10px] text-muted-foreground truncate mt-0.5">
                           {a.kiln_id || '--'} · {fmtTime(a.ts)}
+                          {a.handler ? <span className="ml-1.5">· {a.handler}</span> : null}
                           {Number(a.has_report) === 1 ? (
                             <span className="ml-1.5 text-primary">· 有分析</span>
                           ) : (

@@ -42,6 +42,10 @@ export interface AlertAckRecord {
   handler: string;
   comment: string;
   rootCause: string;
+  /** 根因分类（结构化枚举值），历史记录为空 */
+  rootCauseCategory: string;
+  /** 处理措施 */
+  measure: string;
   ackedAt: string | null;
 }
 
@@ -57,9 +61,19 @@ export async function ensureAlertTables(): Promise<void> {
   await execute(
     `CREATE STABLE IF NOT EXISTS ${ACK_STABLE} (` +
       'ts TIMESTAMP, event_key NCHAR(200), status NCHAR(16), handler NCHAR(64), ' +
-      'remark NCHAR(500), root_cause NCHAR(255)' +
+      'remark NCHAR(500), root_cause NCHAR(255), ' +
+      'root_cause_category NCHAR(32), measure NCHAR(500)' +
       `) TAGS (device_id NCHAR(64))`,
   );
+  // 兼容已存在的旧表：补列（列已存在时 TDengine 报错，忽略即可，迁移幂等）
+  const migrations = ['root_cause_category NCHAR(32)', 'measure NCHAR(500)'];
+  for (const col of migrations) {
+    try {
+      await execute(`ALTER STABLE ${ACK_STABLE} ADD COLUMN ${col}`);
+    } catch {
+      // 列已存在 / 并发迁移：无需处理
+    }
+  }
   ensured = true;
 }
 
@@ -125,7 +139,8 @@ export async function fetchAlertAcks(): Promise<Map<string, AlertAckRecord>> {
   try {
     const res = await query(
       `SELECT event_key, LAST(status) AS status, LAST(handler) AS handler, ` +
-        `LAST(remark) AS remark, LAST(root_cause) AS root_cause, LAST(ts) AS acked_at ` +
+        `LAST(remark) AS remark, LAST(root_cause) AS root_cause, ` +
+        `LAST(root_cause_category) AS root_cause_category, LAST(measure) AS measure, LAST(ts) AS acked_at ` +
         `FROM ${ACK_STABLE} GROUP BY event_key`,
     );
     for (const r of toRows(res)) {
@@ -136,6 +151,8 @@ export async function fetchAlertAcks(): Promise<Map<string, AlertAckRecord>> {
         handler: String(r.handler ?? ''),
         comment: String(r.remark ?? ''),
         rootCause: String(r.root_cause ?? ''),
+        rootCauseCategory: String(r.root_cause_category ?? ''),
+        measure: String(r.measure ?? ''),
         ackedAt: r.acked_at ? String(r.acked_at) : null,
       });
     }
@@ -152,6 +169,8 @@ export interface AckInput {
   handler?: string;
   comment?: string;
   rootCause?: string;
+  rootCauseCategory?: string;
+  measure?: string;
 }
 
 export async function writeAlertAck(input: AckInput): Promise<void> {
@@ -161,6 +180,27 @@ export async function writeAlertAck(input: AckInput): Promise<void> {
   const sql =
     `INSERT INTO ${sub} USING ${ACK_STABLE} TAGS ('${escapeSql(input.deviceId || 'unknown')}') ` +
     `VALUES (NOW, '${escapeSql(input.eventKey)}', '${escapeSql(status)}', ` +
-    `'${escapeSql(input.handler || '')}', '${escapeSql(input.comment || '')}', '${escapeSql(input.rootCause || '')}')`;
+    `'${escapeSql(input.handler || '')}', '${escapeSql(input.comment || '')}', '${escapeSql(input.rootCause || '')}', ` +
+    `'${escapeSql(input.rootCauseCategory || '')}', '${escapeSql(input.measure || '')}')`;
   await execute(sql);
+}
+
+/** 单条事件的处理时间线（按时间正序）。用于详情抽屉展示完整处理轨迹。 */
+export async function fetchAckTimeline(
+  eventKey: string,
+): Promise<Array<Record<string, unknown>>> {
+  await ensureAlertTables();
+  const sql =
+    `SELECT ts, status, handler, remark, root_cause, root_cause_category, measure ` +
+    `FROM ${ACK_STABLE} WHERE event_key = '${escapeSql(eventKey)}' ORDER BY ts ASC`;
+  const rows = toRows(await query(sql));
+  return rows.map((r) => ({
+    ts: r.ts,
+    status: String(r.status ?? '') === 'acked' ? 'acked' : 'new',
+    handler: String(r.handler ?? ''),
+    comment: String(r.remark ?? ''),
+    rootCause: String(r.root_cause ?? ''),
+    rootCauseCategory: String(r.root_cause_category ?? ''),
+    measure: String(r.measure ?? ''),
+  }));
 }
