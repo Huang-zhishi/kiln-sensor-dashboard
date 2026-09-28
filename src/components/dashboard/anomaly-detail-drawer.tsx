@@ -143,7 +143,10 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
 
   const direction = String(item?.direction || '');
   const isHigh = direction === 'NEW_HIGH';
-  const accent = isHigh ? 'var(--danger)' : 'var(--info)';
+  // 注意：ECharts 不支持 CSS 变量（var(--danger) 会导致 hover 时线条消失），
+  // 必须用具体色值；此处与 globals.css 的 --danger / --info 保持一致。
+  const accent = isHigh ? '#ff4d5e' : '#4da3ff';
+  const accentCss = isHigh ? 'var(--danger)' : 'var(--info)';
   const unit = sensorTag ? UNIT_MAP[classifySensor(sensorTag)] : '';
   const report = String(detail?.report || '');
 
@@ -217,11 +220,11 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
       <SheetContent side="right" className="w-full sm:max-w-[580px] overflow-y-auto p-0">
         <SheetHeader className="px-5 py-4 border-b border-border">
           <SheetTitle className="flex items-center gap-2 text-sm">
-            <span className="w-2 h-2 rounded-full" style={{ background: accent }} />
+            <span className="w-2 h-2 rounded-full" style={{ background: accentCss }} />
             <span className="truncate">{sensorTag || '异常详情'}</span>
             <span
               className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0"
-              style={{ color: accent, background: `color-mix(in srgb, ${accent} 16%, transparent)` }}
+              style={{ color: accentCss, background: `color-mix(in srgb, ${accentCss} 16%, transparent)` }}
             >
               {DIRECTION_LABEL[direction] || direction || '异常'}
             </span>
@@ -257,7 +260,7 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                 </div>
                 <div>
                   <div className="text-muted-foreground text-[10px]">触发数值</div>
-                  <div className="font-mono font-bold tabular-nums" style={{ color: accent }}>
+                  <div className="font-mono font-bold tabular-nums" style={{ color: accentCss }}>
                     {num(item?.sensor_value)} {unit}
                   </div>
                 </div>
