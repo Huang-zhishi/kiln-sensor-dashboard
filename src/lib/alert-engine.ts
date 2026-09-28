@@ -64,7 +64,7 @@ async function notifyNewAnomalies(state: EngineState): Promise<void> {
   let rows: Record<string, unknown>[] = [];
   try {
     const res = await query(
-      `SELECT ts, event_key, sensor_tag, sensor_value, direction, baseline_min, baseline_max, device_id, kiln_id, note
+      `SELECT ts, event_key, sensor_tag, sensor_value, direction, baseline_min, baseline_max, device_id, kiln_id, note, report, level
        FROM anomaly_events WHERE ts > ${Math.floor(lastMs)} ORDER BY ts ASC LIMIT 20`,
     );
     rows = toRows(res);
@@ -80,9 +80,17 @@ async function notifyNewAnomalies(state: EngineState): Promise<void> {
     const tag = String(r.sensor_tag ?? '');
     const dir = String(r.direction ?? '');
     const label = dir === 'NEW_HIGH' ? '突破历史最高' : dir === 'NEW_LOW' ? '突破历史最低' : dir;
-    const note = r.note ? `\n备注：${String(r.note)}` : '';
-    const content = `【极值异常】${tag}\n${label}：${String(r.sensor_value)}（历史区间 ${String(r.baseline_min)} ~ ${String(r.baseline_max)}）${note}`;
-    await sendWecomMessage(content);
+    const level = String(r.level ?? '');
+    const note = r.note ? `\n> 备注：${String(r.note)}` : '';
+    const levelTag = level ? `【${level}】` : '';
+    // 头部告警信息 + Agent 分析报告全文（报告在写库时已生成）
+    const header =
+      `## ⚠️ ${levelTag}突破历史极值 · Agent 分析\n` +
+      `> 测点：${tag}\n` +
+      `> ${label}：${String(r.sensor_value)}（历史区间 ${String(r.baseline_min)} ~ ${String(r.baseline_max)}）${note}`;
+    const report = String(r.report ?? '').trim();
+    const content = report ? `${header}\n\n${report}` : `${header}\n\n> （暂无分析报告）`;
+    await sendWecomMarkdown(content);
   }
   state.anomaly_notified_ms = maxMs;
 }
@@ -124,6 +132,61 @@ export async function sendWecomMessage(content: string): Promise<'sent' | 'faile
     console.error('[alert-engine] 企业微信通知失败:', err);
     return 'failed';
   }
+}
+
+/** 按 UTF-8 字节上限切分（不切断字符），用于企业微信 markdown 4096 字节限制。 */
+function splitByBytes(text: string, limit: number): string[] {
+  const out: string[] = [];
+  let cur = '';
+  for (const ch of text) {
+    if (byteLen(cur + ch) > limit) {
+      out.push(cur);
+      cur = ch;
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+function byteLen(s: string): number {
+  return typeof Buffer !== 'undefined' ? Buffer.byteLength(s, 'utf8') : s.length * 3;
+}
+
+/** 企业微信 markdown 通知（超长自动分片；用于带 Agent 分析报告的极值异常）。 */
+export async function sendWecomMarkdown(content: string): Promise<'sent' | 'failed' | 'skipped'> {
+  const url = process.env.WECHAT_WEBHOOK_URL || process.env.WECOM_WEBHOOK_URL || '';
+  if (!url) return 'skipped';
+  const MAX_CHUNKS = 4; // 上限保护，避免一条异常刷屏
+  let chunks = splitByBytes(content, 3800);
+  let truncated = false;
+  if (chunks.length > MAX_CHUNKS) {
+    chunks = chunks.slice(0, MAX_CHUNKS);
+    truncated = true;
+  }
+  let ok = true;
+  for (let i = 0; i < chunks.length; i++) {
+    let body = chunks.length === 1 ? chunks[i] : `(${i + 1}/${chunks.length})\n${chunks[i]}`;
+    if (truncated && i === chunks.length - 1) {
+      body = `${body}\n\n> 报告过长已截断，完整版见中控台「告警中心」`;
+    }
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msgtype: 'markdown', markdown: { content: body } }),
+        signal: AbortSignal.timeout(8000),
+      });
+      ok = ok && r.ok;
+    } catch (err) {
+      console.error('[alert-engine] 企业微信 markdown 通知失败:', err);
+      ok = false;
+    }
+  }
+  const status = ok ? 'sent' : 'failed';
+  console.log(`[alert-engine] 企业微信分析报告 ${status}（${chunks.length} 片）: ${content.split('\n')[0]}`);
+  return status;
 }
 
 function buildMessage(rule: AlertRule, value: number): string {
