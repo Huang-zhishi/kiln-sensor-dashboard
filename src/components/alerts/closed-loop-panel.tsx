@@ -84,6 +84,8 @@ export function ClosedLoopPanel() {
   const [stats, setStats] = useState<ClosedLoopStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
 
   const load = useCallback(async (h: number) => {
     setLoading(true);
@@ -103,6 +105,44 @@ export function ClosedLoopPanel() {
   useEffect(() => {
     void load(hours);
   }, [hours, load]);
+
+  const pushWeekly = useCallback(async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await apiFetch('/api/reports/closed-loop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'weekly', hours: 168 }),
+      });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.error || '推送失败');
+      setMsg(j.notify === 'sent' ? '周报已推送企业微信' : j.notify === 'skipped' ? '未配置企业微信 Webhook，未推送' : '推送失败');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '推送失败');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const scanEscalation = useCallback(async () => {
+    setBusy(true);
+    setMsg('');
+    try {
+      const r = await apiFetch('/api/reports/closed-loop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'escalation' }),
+      });
+      const j = await r.json();
+      if (!j.success) throw new Error(j.error || '扫描失败');
+      setMsg('超时扫描完成（超阈值事件已推送企微）');
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : '扫描失败');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const rate = stats ? Math.round(stats.handling_rate * 100) : 0;
   const catTotal = stats ? stats.by_category.reduce((s, c) => s + c.count, 0) : 0;
@@ -124,6 +164,23 @@ export function ClosedLoopPanel() {
             {w.label}
           </button>
         ))}
+        <div className="ml-auto flex items-center gap-2">
+          {msg && <span className="text-[11px] text-muted-foreground">{msg}</span>}
+          <button
+            onClick={pushWeekly}
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover disabled:opacity-50 transition-colors"
+          >
+            推送周报
+          </button>
+          <button
+            onClick={scanEscalation}
+            disabled={busy}
+            className="px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover disabled:opacity-50 transition-colors"
+          >
+            扫描超时
+          </button>
+        </div>
       </div>
 
       {error && (
