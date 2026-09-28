@@ -2,7 +2,7 @@
 // 单进程内 setInterval 周期评估（默认 10s）；活动状态落 data/config/alert-state.json，
 // 事件与处理记录落 TDengine（alert_events / alert_acks）。
 
-import { queryWithCache, CACHE_TTL } from './db';
+import { queryWithCache, CACHE_TTL, query, toRows } from './db';
 import { loadRules, type AlertRule } from './alert-rules';
 import { loadMetaMap, isAlertable } from './sensor-meta';
 import { appendAlertEvent } from './alert-store';
@@ -30,6 +30,8 @@ interface EngineState {
   version: number;
   active: Record<string, ActiveAlert>;
   breachSince: Record<string, number>;
+  /** 已通知的极值异常最大 ts（epoch 毫秒），用于去重/避免重复推送 */
+  anomaly_notified_ms?: number;
 }
 
 let lastEval = 0;
@@ -42,11 +44,47 @@ function loadState(): EngineState {
     version: 1,
     active: s.active && typeof s.active === 'object' ? s.active : {},
     breachSince: s.breachSince && typeof s.breachSince === 'object' ? s.breachSince : {},
+    // 必须保留：否则每轮都走「首次运行」分支，极值异常通知永远不会发
+    anomaly_notified_ms: typeof s.anomaly_notified_ms === 'number' ? s.anomaly_notified_ms : undefined,
   };
 }
 
 function saveState(s: EngineState): void {
   writeConfig(STATE_FILE, s);
+}
+
+// 极值异常（Agent 写入 anomaly_events）→ 中控台统一推送企业微信。
+// 与规则告警共用 webhook；首次运行只记水位、不回刷历史，避免刷屏。
+async function notifyNewAnomalies(state: EngineState): Promise<void> {
+  const lastMs = Number(state.anomaly_notified_ms || 0);
+  if (!lastMs) {
+    state.anomaly_notified_ms = Date.now();
+    return;
+  }
+  let rows: Record<string, unknown>[] = [];
+  try {
+    const res = await query(
+      `SELECT ts, event_key, sensor_tag, sensor_value, direction, baseline_min, baseline_max, device_id, kiln_id, note
+       FROM anomaly_events WHERE ts > ${Math.floor(lastMs)} ORDER BY ts ASC LIMIT 20`,
+    );
+    rows = toRows(res);
+  } catch {
+    return; // 表不存在 / 库抖动：跳过
+  }
+  if (!rows.length) return;
+
+  let maxMs = lastMs;
+  for (const r of rows) {
+    const tsMs = new Date(String(r.ts)).getTime();
+    if (isFinite(tsMs) && tsMs > maxMs) maxMs = tsMs;
+    const tag = String(r.sensor_tag ?? '');
+    const dir = String(r.direction ?? '');
+    const label = dir === 'NEW_HIGH' ? '突破历史最高' : dir === 'NEW_LOW' ? '突破历史最低' : dir;
+    const note = r.note ? `\n备注：${String(r.note)}` : '';
+    const content = `【极值异常】${tag}\n${label}：${String(r.sensor_value)}（历史区间 ${String(r.baseline_min)} ~ ${String(r.baseline_max)}）${note}`;
+    await sendWecomMessage(content);
+  }
+  state.anomaly_notified_ms = maxMs;
 }
 
 /** 最新值映射：sensor_tag -> { value, deviceId }（同一 tag 多设备时取其一）。 */
@@ -79,7 +117,9 @@ export async function sendWecomMessage(content: string): Promise<'sent' | 'faile
       body: JSON.stringify({ msgtype: 'text', text: { content } }),
       signal: AbortSignal.timeout(8000),
     });
-    return r.ok ? 'sent' : 'failed';
+    const status = r.ok ? 'sent' : 'failed';
+    console.log(`[alert-engine] 企业微信通知 ${status}: ${content.split('\n')[0]}`);
+    return status;
   } catch (err) {
     console.error('[alert-engine] 企业微信通知失败:', err);
     return 'failed';
@@ -219,6 +259,9 @@ export async function evaluateAlerts(): Promise<void> {
         }
       }
 
+    // 极值异常通知（与规则告警共用 webhook）
+    await notifyNewAnomalies(state);
+
     saveState(state);
     lastEval = now;
   } catch (err) {
@@ -227,7 +270,6 @@ export async function evaluateAlerts(): Promise<void> {
     evaluating = false;
   }
 }
-
 export function getActiveAlerts(): ActiveAlert[] {
   return Object.values(loadState().active).sort((a, b) => b.since - a.since);
 }

@@ -78,5 +78,12 @@ export interface AlertEventItem {
   threshold: number;
   message: string;
   notify: string;
+  /** 'rule' 规则告警 | 'anomaly' 极值异常 */
+  source?: 'rule' | 'anomaly';
+  /** 极值异常原始方向：NEW_HIGH / NEW_LOW */
+  anomaly_direction?: string;
+  baseline_min?: number;
+  baseline_max?: number;
+  has_report?: number;
   ack?: AlertAck | null;
 }

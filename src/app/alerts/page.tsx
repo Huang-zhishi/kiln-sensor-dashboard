@@ -26,8 +26,7 @@ const POLL_MS = 15000;
 
 function pad(n: number) {
   return String(n).padStart(2, '0');
-}
-function fmtFull(iso: string | number): string {
+}function fmtFull(iso: string | number): string {
   const d = new Date(iso);
   if (!isFinite(d.getTime())) return '--';
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -61,6 +60,8 @@ interface Selection {
   ack?: AlertAck | null;
   live?: boolean;
   durationSec?: number;
+  source?: string;
+  directionLabel?: string;
 }
 
 const EMPTY_RULE: AlertRule = {
@@ -79,6 +80,7 @@ const EMPTY_RULE: AlertRule = {
 
 export default function AlertsPage() {
   const [tab, setTab] = useState<'active' | 'history' | 'rules'>('active');
+  const [sourceFilter, setSourceFilter] = useState<'' | 'rule' | 'anomaly'>('');
   const [active, setActive] = useState<ActiveAlert[]>([]);
   const [items, setItems] = useState<AlertEventItem[]>([]);
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -234,6 +236,17 @@ export default function AlertsPage() {
 
   const activeCount = active.length;
   const p1Count = useMemo(() => active.filter((a) => a.severity === 'P1').length, [active]);
+  const filteredItems = useMemo(
+    () => (sourceFilter ? items.filter((i) => i.source === sourceFilter) : items),
+    [items, sourceFilter],
+  );
+
+  const directionText = (e: AlertEventItem): string => {
+    if (e.source === 'anomaly') {
+      return e.anomaly_direction === 'NEW_HIGH' ? '突破最高' : e.anomaly_direction === 'NEW_LOW' ? '突破最低' : '极值突破';
+    }
+    return DIRECTION_LABEL[e.direction] || e.direction;
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
@@ -329,19 +342,35 @@ export default function AlertsPage() {
             )}
           </div>
         ) : tab === 'history' ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              {([['', '全部'], ['rule', '规则告警'], ['anomaly', '极值异常']] as const).map(([k, l]) => (
+                <button
+                  key={k}
+                  onClick={() => setSourceFilter(k)}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    sourceFilter === k ? 'bg-primary/15 border-primary text-foreground' : 'border-border-strong text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+              <span className="text-xs text-muted-foreground ml-2">{filteredItems.length} 条</span>
+            </div>
           <div className="panel overflow-hidden">
-            <div className="max-h-[calc(100vh-160px)] overflow-y-auto">
+            <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-card text-muted-foreground">
                   <tr>
-                    {['时间', '级别', '测点', '方向', '数值', '阈值', '状态', '通知', '处理'].map((h) => (
+                    {['时间', '来源', '级别', '测点', '方向', '数值', '阈值', '状态', '通知', '处理'].map((h) => (
                       <th key={h} className="text-left font-normal px-3 py-2 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((e) => {
+                  {filteredItems.map((e) => {
                     const acked = e.ack?.status === 'acked';
+                    const isAnomaly = e.source === 'anomaly';
                     return (
                       <tr
                         key={`${e.event_key}-${e.ts}`}
@@ -359,30 +388,45 @@ export default function AlertsPage() {
                             notify: String(e.notify),
                             ts: String(e.ts),
                             ack: e.ack,
+                            source: e.source,
+                            directionLabel: directionText(e),
                           })
                         }
                         className="border-t border-border/60 hover:bg-card-hover cursor-pointer"
                       >
                         <td className="px-3 py-1.5 font-mono whitespace-nowrap">{fmtFull(e.ts)}</td>
+                        <td className="px-3 py-1.5">
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px]"
+                            style={
+                              isAnomaly
+                                ? { background: 'color-mix(in srgb, var(--info) 18%, transparent)', color: 'var(--info)' }
+                                : { background: 'color-mix(in srgb, var(--warning) 18%, transparent)', color: 'var(--warning)' }
+                            }
+                          >
+                            {isAnomaly ? '极值异常' : '规则告警'}
+                          </span>
+                        </td>
                         <td className="px-3 py-1.5" style={{ color: SEVERITY_COLOR[e.severity] }}>{e.severity}</td>
                         <td className="px-3 py-1.5 max-w-[240px] truncate">{e.sensor_tag}</td>
-                        <td className="px-3 py-1.5">{DIRECTION_LABEL[e.direction] || e.direction}</td>
+                        <td className="px-3 py-1.5">{directionText(e)}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{Number(e.value).toFixed(2)}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{Number(e.threshold).toFixed(2)}</td>
-                        <td className="px-3 py-1.5" style={{ color: e.state === 'active' ? 'var(--danger)' : 'var(--success)' }}>
-                          {e.state === 'active' ? '触发' : '恢复'}
+                        <td className="px-3 py-1.5" style={{ color: isAnomaly ? 'var(--info)' : e.state === 'active' ? 'var(--danger)' : 'var(--success)' }}>
+                          {isAnomaly ? '事件' : e.state === 'active' ? '触发' : '恢复'}
                         </td>
                         <td className="px-3 py-1.5">{NOTIFY_LABEL[e.notify] || e.notify}</td>
                         <td className="px-3 py-1.5" style={{ color: acked ? 'var(--success)' : 'var(--muted-foreground)' }}>{acked ? '已处理' : '未处理'}</td>
                       </tr>
                     );
                   })}
-                  {items.length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">暂无告警历史</td></tr>
+                  {filteredItems.length === 0 && (
+                    <tr><td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">暂无告警历史</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+          </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
@@ -518,7 +562,7 @@ export default function AlertsPage() {
               <div className="grid grid-cols-2 gap-2 text-muted-foreground">
                 <div>时间：<span className="text-foreground">{fmtFull(selected.ts)}</span></div>
                 <div>设备：<span className="text-foreground">{selected.deviceId}</span></div>
-                <div>方向：<span className="text-foreground">{DIRECTION_LABEL[selected.direction]}</span></div>
+                <div>方向：<span className="text-foreground">{selected.directionLabel || DIRECTION_LABEL[selected.direction]}</span></div>
                 <div>阈值：<span className="text-foreground font-mono">{selected.threshold}</span></div>
                 <div>数值：<span className="text-foreground font-mono">{Number(selected.value).toFixed(2)}</span></div>
                 <div>通知：<span className="text-foreground">{NOTIFY_LABEL[selected.notify] || selected.notify}</span></div>

@@ -4,7 +4,8 @@
 // POST  /api/alerts/[key]  body: { action:'resend' }
 
 import { NextResponse } from 'next/server';
-import { fetchAlertEventByKey, fetchAlertAcks, writeAlertAck } from '@/lib/alert-store';
+import { fetchAlertEventByKey, fetchAlertAcks, writeAlertAck, escapeSql } from '@/lib/alert-store';
+import { query, toRows } from '@/lib/db';
 import { sendWecomMessage } from '@/lib/alert-engine';
 
 export const dynamic = 'force-dynamic';
@@ -40,7 +41,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ key: s
     // 忽略非法 body
   }
   try {
-    const event = await fetchAlertEventByKey(eventKey);
+    let event = await fetchAlertEventByKey(eventKey);
+    // 极值异常的事件在 anomaly_events 里，补查 device_id
+    if (!event) {
+      try {
+        const res = await query(
+          `SELECT device_id, sensor_tag FROM anomaly_events WHERE event_key = '${escapeSql(eventKey)}' ORDER BY ts DESC LIMIT 1`,
+        );
+        const rows = toRows(res);
+        if (rows.length > 0) event = rows[0];
+      } catch {
+        // ignore
+      }
+    }
     const deviceId = body.device_id || String(event?.device_id ?? 'unknown');
     await writeAlertAck({
       eventKey,
@@ -71,9 +84,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ key: st
     return NextResponse.json({ success: false, error: '不支持的动作' }, { status: 400 });
   }
   try {
+    let content = '';
     const event = await fetchAlertEventByKey(eventKey);
-    if (!event) return NextResponse.json({ success: false, error: 'not found' }, { status: 404 });
-    const content = String(event.message || event.sensor_tag || '') || `告警 ${eventKey}`;
+    if (event) {
+      content = String(event.message || event.sensor_tag || '');
+    } else {
+      // 极值异常：从 anomaly_events 构造通知文案
+      const res = await query(
+        `SELECT sensor_tag, sensor_value, direction, baseline_min, baseline_max, note FROM anomaly_events WHERE event_key = '${escapeSql(eventKey)}' ORDER BY ts DESC LIMIT 1`,
+      );
+      const rows = toRows(res);
+      if (rows.length > 0) {
+        const r = rows[0];
+        const dir = String(r.direction ?? '');
+        const label = dir === 'NEW_HIGH' ? '突破历史最高' : dir === 'NEW_LOW' ? '突破历史最低' : dir;
+        content = `【极值异常】${String(r.sensor_tag)}\n${label}：${String(r.sensor_value)}（历史区间 ${String(r.baseline_min)} ~ ${String(r.baseline_max)}）`;
+      }
+    }
+    if (!content) return NextResponse.json({ success: false, error: 'not found' }, { status: 404 });
     const notify = await sendWecomMessage(content);
     return NextResponse.json({ success: true, notify });
   } catch (err) {

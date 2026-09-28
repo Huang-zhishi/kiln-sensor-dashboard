@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { CACHE_TTL, queryWithCache } from '@/lib/db';
 import { fetchAcks } from '@/lib/anomaly-acks';
+import { fetchAlertAcks } from '@/lib/alert-store';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,18 @@ export async function GET(request: Request) {
   try {
     const events = await queryWithCache<Record<string, unknown>[]>(cacheKey, sql, CACHE_TTL.latest);
     const acks = await fetchAcks();
+    // 合并告警中心的处理记录（alert_acks）：同一事件在 /alerts 处理后首页也同步
+    try {
+      const la = await fetchAlertAcks();
+      for (const [k, v] of la) {
+        const prev = acks.get(k);
+        if (!prev || v.status === 'acked') {
+          acks.set(k, { status: v.status, ackedAt: v.ackedAt ?? prev?.ackedAt ?? null });
+        }
+      }
+    } catch {
+      // ignore
+    }
     let items = events.map((e) => {
       const a = acks.get(String(e.event_key ?? ''));
       return {
