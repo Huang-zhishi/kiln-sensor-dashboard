@@ -134,43 +134,92 @@ export async function sendWecomMessage(content: string): Promise<'sent' | 'faile
   }
 }
 
-/** 按 UTF-8 字节上限切分（不切断字符），用于企业微信 markdown 4096 字节限制。 */
-function splitByBytes(text: string, limit: number): string[] {
-  const out: string[] = [];
-  let cur = '';
-  for (const ch of text) {
-    if (byteLen(cur + ch) > limit) {
-      out.push(cur);
-      cur = ch;
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-
+/** UTF-8 字节长度（企业微信 markdown 上限 4096 字节，留安全余量用 3800）。 */
 function byteLen(s: string): number {
   return typeof Buffer !== 'undefined' ? Buffer.byteLength(s, 'utf8') : s.length * 3;
 }
 
-/** 企业微信 markdown 通知（超长自动分片；用于带 Agent 分析报告的极值异常）。 */
+// markdown 表格分隔行：| --- | :---: | ...
+const TABLE_SEP_RE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+// 小数点统一两位：只处理 873.05853 / -14.444483，跳过 §2.3 章节号
+const DECIMAL_RE = /(?<![\d.§])(-?\d+\.\d+)(?![\d])/g;
+
+/** 与 Agent 侧 _round_decimals_2dp 对齐：小数值统一保留两位。 */
+function roundDecimals2dp(text: string): string {
+  return text.replace(DECIMAL_RE, (m) => {
+    const n = Number(m);
+    return isFinite(n) ? n.toFixed(2) : m;
+  });
+}
+
+function splitTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
+/** 与 Agent 侧 _md_tables_to_wecom 对齐：企业微信 markdown 不支持表格，转为列表。 */
+function mdTablesToWecom(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim().startsWith('|') && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+      i += 2; // 跳过表头与分隔行
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        const cells = splitTableRow(lines[i]).filter((c) => c !== '');
+        if (cells.length === 1) out.push(`- ${cells[0]}`);
+        else if (cells.length === 2) out.push(`- **${cells[0]}**：${cells[1]}`);
+        else out.push(`- **${cells[0]}**：${cells.slice(1).join('　')}`);
+        i++;
+      }
+      out.push('');
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  return out.join('\n');
+}
+
+/** 与 Agent 侧 _split_markdown_by_bytes 对齐：优先按行边界切分，不切断多字节字符。 */
+function splitMarkdownByBytes(text: string, limit: number): string[] {
+  if (byteLen(text) <= limit) return [text];
+  const parts: string[] = [];
+  let cur = '';
+  for (let line of text.split('\n')) {
+    const candidate = cur ? `${cur}\n${line}` : line;
+    if (byteLen(candidate) <= limit) {
+      cur = candidate;
+      continue;
+    }
+    if (cur) parts.push(cur);
+    while (byteLen(line) > limit) {
+      let piece = '';
+      for (const ch of line) {
+        if (byteLen(piece + ch) > limit) break;
+        piece += ch;
+      }
+      parts.push(piece);
+      line = line.slice(piece.length);
+    }
+    cur = line;
+  }
+  if (cur) parts.push(cur);
+  return parts.length ? parts : [''];
+}
+
+/** 企业微信 markdown 通知（带 Agent 分析报告）：与 Agent 原逻辑一致，不截断、按行分片。 */
 export async function sendWecomMarkdown(content: string): Promise<'sent' | 'failed' | 'skipped'> {
   const url = process.env.WECHAT_WEBHOOK_URL || process.env.WECOM_WEBHOOK_URL || '';
   if (!url) return 'skipped';
-  const MAX_CHUNKS = 4; // 上限保护，避免一条异常刷屏
-  let chunks = splitByBytes(content, 3800);
-  let truncated = false;
-  if (chunks.length > MAX_CHUNKS) {
-    chunks = chunks.slice(0, MAX_CHUNKS);
-    truncated = true;
-  }
+  const prepared = roundDecimals2dp(mdTablesToWecom(content));
+  const chunks = splitMarkdownByBytes(prepared, 3800);
   let ok = true;
   for (let i = 0; i < chunks.length; i++) {
-    let body = chunks.length === 1 ? chunks[i] : `(${i + 1}/${chunks.length})\n${chunks[i]}`;
-    if (truncated && i === chunks.length - 1) {
-      body = `${body}\n\n> 报告过长已截断，完整版见中控台「告警中心」`;
-    }
+    const body = chunks.length === 1 ? chunks[i] : `(${i + 1}/${chunks.length})\n${chunks[i]}`;
     try {
       const r = await fetch(url, {
         method: 'POST',
@@ -185,7 +234,7 @@ export async function sendWecomMarkdown(content: string): Promise<'sent' | 'fail
     }
   }
   const status = ok ? 'sent' : 'failed';
-  console.log(`[alert-engine] 企业微信分析报告 ${status}（${chunks.length} 片）: ${content.split('\n')[0]}`);
+  console.log(`[alert-engine] 企业微信分析报告 ${status}（${chunks.length} 片, ${byteLen(prepared)}B）: ${content.split('\n')[0]}`);
   return status;
 }
 
