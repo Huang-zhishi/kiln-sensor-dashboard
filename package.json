@@ -14,6 +14,7 @@
     "build:coze": "bash ./scripts/build.sh",
     "start:coze": "bash ./scripts/start.sh",
     "ts-check": "tsc -p tsconfig.json",
+    "seed:sop-rules": "node scripts/seed-sop-rules.mjs",
     "validate": "pnpm dlx concurrently --group --names lint-tsc,lint-build,lint-style \"pnpm ts-check\" \"pnpm lint:build\" \"pnpm lint:style\""
   },
   "dependencies": {
