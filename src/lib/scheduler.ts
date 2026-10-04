@@ -4,19 +4,24 @@
 // - 周报：每 10 分钟检查一次是否到点（默认周一 08:00）
 //
 // 单进程部署（standalone 单实例）下无重复执行问题；定时器 unref 不阻塞退出。
+// 注意：Next.js 会把本模块打进多个 bundle，模块级 `started` 不跨 bundle 共享，
+// 故将单例标记放在 globalThis 上（与 alert-engine 同理），避免重复调度。
 
 import { ensureAlertEngine } from './alert-engine';
 import { runEscalationScan } from './escalation';
 import { maybeSendWeeklyReport } from './weekly-report';
 
-let started = false;
+type SchedulerRuntime = { started: boolean };
+const runtime: SchedulerRuntime = ((globalThis as { __kilnScheduler?: SchedulerRuntime }).__kilnScheduler ??= {
+  started: false,
+});
 
 const ESCALATION_INTERVAL_MS = 5 * 60_000;
 const REPORT_CHECK_INTERVAL_MS = 10 * 60_000;
 
 export function ensureSchedulers(): void {
-  if (started) return;
-  started = true;
+  if (runtime.started) return;
+  runtime.started = true;
 
   ensureAlertEngine();
 

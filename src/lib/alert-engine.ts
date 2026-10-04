@@ -34,9 +34,20 @@ interface EngineState {
   anomaly_notified_ms?: number;
 }
 
-let lastEval = 0;
-let evaluating = false;
-let timer: ReturnType<typeof setInterval> | null = null;
+// 单例守卫放在 globalThis 上：Next.js 会把 lib 打进多个 bundle（instrumentation / route
+// handlers / server components），模块级变量不跨 bundle 共享，会出现「两个告警引擎各跑一个
+// 定时器」→ 同一极值事件被推送两次（2026-10-04 发现）。globalThis 在同一进程内共享，
+// 是 Next.js 单例的标准修法（多进程部署需改用跨进程锁）。
+type EngineRuntime = {
+  timer: ReturnType<typeof setInterval> | null;
+  evaluating: boolean;
+  lastEval: number;
+};
+const runtime: EngineRuntime = ((globalThis as { __kilnAlertEngine?: EngineRuntime }).__kilnAlertEngine ??= {
+  timer: null,
+  evaluating: false,
+  lastEval: 0,
+});
 
 function loadState(): EngineState {
   const s = readConfig<EngineState>(STATE_FILE, { version: 1, active: {}, breachSince: {} });
@@ -245,8 +256,8 @@ function buildMessage(rule: AlertRule, value: number): string {
 }
 
 export async function evaluateAlerts(): Promise<void> {
-  if (evaluating) return;
-  evaluating = true;
+  if (runtime.evaluating) return;
+  runtime.evaluating = true;
   try {
     const rules = loadRules();
     const state = loadState();
@@ -375,11 +386,11 @@ export async function evaluateAlerts(): Promise<void> {
     await notifyNewAnomalies(state);
 
     saveState(state);
-    lastEval = now;
+    runtime.lastEval = now;
   } catch (err) {
     console.error('[alert-engine] 评估失败:', err);
   } finally {
-    evaluating = false;
+    runtime.evaluating = false;
   }
 }
 export function getActiveAlerts(): ActiveAlert[] {
@@ -387,15 +398,15 @@ export function getActiveAlerts(): ActiveAlert[] {
 }
 
 export function getLastEval(): number {
-  return lastEval;
+  return runtime.lastEval;
 }
 
-/** 启动物理引擎（单进程单例）。重复调用无副作用。 */
+/** 启动物理引擎（进程内单例，跨 bundle 共享）。重复调用无副作用。 */
 export function ensureAlertEngine(): void {
-  if (timer) return;
+  if (runtime.timer) return;
   void evaluateAlerts();
-  timer = setInterval(() => void evaluateAlerts(), EVAL_INTERVAL_MS);
-  timer.unref?.();
+  runtime.timer = setInterval(() => void evaluateAlerts(), EVAL_INTERVAL_MS);
+  runtime.timer.unref?.();
 }
 
 /** 通知文本构造，供手动「重发」复用。 */
