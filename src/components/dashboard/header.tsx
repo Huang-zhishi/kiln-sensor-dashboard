@@ -78,6 +78,9 @@ export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = tr
           <Link href="/alerts" className="nav-btn font-medium">
             告警中心
           </Link>
+          <Link href="/extreme" className="nav-btn font-medium">
+            极值基线
+          </Link>
           <Link href="/reports" className="nav-btn font-medium">
             报表中心
           </Link>
