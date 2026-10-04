@@ -288,6 +288,12 @@ export default function AlertsPage() {
               {t === 'active' ? '活动告警' : t === 'history' ? '历史告警' : t === 'rules' ? '规则配置' : '闭环分析'}
             </button>
           ))}
+          <Link
+            href="/alerts/extreme"
+            className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground transition-colors"
+          >
+            极值基线
+          </Link>
         </div>
       </header>
 

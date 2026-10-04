@@ -224,12 +224,9 @@ export default function ExtremeBaselinePage() {
       <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="mb-1 text-xs text-muted-foreground">
-              <Link href="/" className="hover:text-foreground">
-                中控台
-              </Link>
-              <span className="mx-1">/</span>极值基线
-            </div>
+            <Link href="/alerts" className="nav-btn mb-2 inline-flex items-center gap-1">
+              ← 返回告警中心
+            </Link>
             <h1 className="text-xl font-semibold tracking-wide">极值基线</h1>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
               基线由 Agent 自动推进；本页可查看每次变更来源（突破事件 / 首扫校准 / 人工修正），
@@ -237,9 +234,6 @@ export default function ExtremeBaselinePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/alerts" className="nav-btn">
-              告警中心
-            </Link>
             <button className="nav-btn" onClick={openEvents}>
               最近突破事件
             </button>
