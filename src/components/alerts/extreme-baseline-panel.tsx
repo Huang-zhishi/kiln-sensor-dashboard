@@ -1,12 +1,10 @@
 'use client';
 
-// 极值基线：可视化 + 可回溯 + 人工修正
-// 背景：极值基线由 Agent 自动推进；若毛刺/坏值把基线带偏，此前无法改回。
-// 本页通过 /api/extreme/*（服务端代理 Agent）提供：
-//   基线列表、变更历史（审计）、人工修正、按历史统计重置、撤销最近变更、最近突破事件。
+// 极值基线面板（作为「告警中心」的一个 tab，与活动/历史告警同壳同风格）
+// 数据来源：/api/extreme/*（中控台服务端代理 Agent /api/admin/extreme/*）。
+// 能力：基线列表 + 变更历史（审计，可回溯）+ 修正 / 重置为历史统计 / 撤销最近变更 + 最近突破事件。
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 
 interface Baseline {
   sensor_tag: string;
@@ -82,7 +80,7 @@ async function callJson<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export default function ExtremeBaselinePage() {
+export function ExtremeBaselinePanel() {
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<Baseline[]>([]);
@@ -220,144 +218,145 @@ export default function ExtremeBaselinePage() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <Link href="/alerts" className="nav-btn mb-2 inline-flex items-center gap-1">
-              ← 返回告警中心
-            </Link>
-            <h1 className="text-xl font-semibold tracking-wide">极值基线</h1>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              基线由 Agent 自动推进；本页可查看每次变更来源（突破事件 / 首扫校准 / 人工修正），
-              并对被毛刺带偏的基线做「修正 / 重置为历史统计 / 撤销最近变更」。
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="nav-btn" onClick={openEvents}>
-              最近突破事件
-            </button>
-          </div>
+    <div className="space-y-3">
+      {notice && (
+        <div
+          className={`rounded-md border px-3 py-2 text-sm ${
+            notice.kind === 'ok'
+              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+              : 'border-red-500/30 bg-red-500/10 text-red-300'
+          }`}
+        >
+          {notice.text}
+          <button className="float-right opacity-70 hover:opacity-100" onClick={() => setNotice(null)}>
+            ×
+          </button>
         </div>
+      )}
 
-        {notice && (
-          <div
-            className={`mb-4 rounded-md border px-3 py-2 text-sm ${
-              notice.kind === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {notice.text}
-            <button className="float-right opacity-70 hover:opacity-100" onClick={() => setNotice(null)}>
-              ×
-            </button>
-          </div>
-        )}
-
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                setPage(1);
-                void load();
-              }
-            }}
-            placeholder="按测点名搜索（如 TI_206F / 窑体温度）"
-            className="w-72 rounded-md border border-border bg-card px-3 py-1.5 text-sm outline-none focus:border-primary"
-          />
-          <button
-            className="nav-btn"
-            onClick={() => {
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
               setPage(1);
               void load();
-            }}
-          >
-            搜索
-          </button>
-          <button className="nav-btn" onClick={() => void load()} disabled={loading}>
-            {loading ? '加载中…' : '刷新'}
-          </button>
-          <span className="ml-auto text-xs text-muted-foreground">共 {total} 个测点</span>
-        </div>
+            }
+          }}
+          placeholder="按测点名搜索（如 TI_206F / 窑体温度）"
+          className="w-72 rounded border border-border-strong bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary"
+        />
+        <button
+          className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            setPage(1);
+            void load();
+          }}
+        >
+          搜索
+        </button>
+        <button
+          className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground disabled:opacity-60"
+          onClick={() => void load()}
+          disabled={loading}
+        >
+          {loading ? '加载中…' : '刷新'}
+        </button>
+        <button
+          className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground"
+          onClick={() => void openEvents()}
+        >
+          最近突破事件
+        </button>
+        <span className="ml-auto text-xs text-muted-foreground">
+          共 {total} 个测点 · 基线自动推进；被毛刺带偏时可「撤销/修正/重置」，操作留审计
+        </span>
+      </div>
 
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table className="w-full min-w-[860px] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                <th className="px-3 py-2 font-medium">测点</th>
-                <th className="px-3 py-2 text-right font-medium">当前最小值</th>
-                <th className="px-3 py-2 text-right font-medium">当前最大值</th>
-                <th className="px-3 py-2 font-medium">更新时间</th>
-                <th className="px-3 py-2 text-right font-medium">操作</th>
+      <div className="panel overflow-x-auto">
+        <table className="w-full min-w-[860px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-muted-foreground">
+              <th className="px-3 py-2 font-medium">测点</th>
+              <th className="px-3 py-2 text-right font-medium">当前最小值</th>
+              <th className="px-3 py-2 text-right font-medium">当前最大值</th>
+              <th className="px-3 py-2 font-medium">更新时间</th>
+              <th className="px-3 py-2 text-right font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((row) => (
+              <tr key={row.sensor_tag} className="border-b border-border/60 last:border-0 hover:bg-card-hover">
+                <td className="px-3 py-2">{row.sensor_tag}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtBound(row.min_val)}</td>
+                <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtBound(row.max_val)}</td>
+                <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{fmtTime(row.updated_at)}</td>
+                <td className="px-3 py-2 text-right whitespace-nowrap">
+                  <button className="mr-2 text-primary hover:underline" onClick={() => void openHistory(row)}>
+                    历史
+                  </button>
+                  <button className="mr-2 text-primary hover:underline" onClick={() => openEdit(row)}>
+                    修正
+                  </button>
+                  <button className="mr-2 text-amber-400 hover:underline" onClick={() => void resetFromStats(row)}>
+                    重置
+                  </button>
+                  <button className="text-red-400 hover:underline" onClick={() => void undo(row)}>
+                    撤销
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((row) => (
-                <tr key={row.sensor_tag} className="border-b border-border/60 last:border-0 hover:bg-card-hover">
-                  <td className="px-3 py-2">{row.sensor_tag}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtBound(row.min_val)}</td>
-                  <td className="px-3 py-2 text-right font-mono tabular-nums">{fmtBound(row.max_val)}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{fmtTime(row.updated_at)}</td>
-                  <td className="px-3 py-2 text-right whitespace-nowrap">
-                    <button className="mr-2 text-primary hover:underline" onClick={() => void openHistory(row)}>
-                      历史
-                    </button>
-                    <button className="mr-2 text-primary hover:underline" onClick={() => openEdit(row)}>
-                      修正
-                    </button>
-                    <button className="mr-2 text-amber-400 hover:underline" onClick={() => void resetFromStats(row)}>
-                      重置
-                    </button>
-                    <button className="text-red-400 hover:underline" onClick={() => void undo(row)}>
-                      撤销
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!loading && items.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
-                    暂无数据
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {!loading && items.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-8 text-center text-muted-foreground">
+                  暂无数据
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-        <div className="mt-3 flex items-center justify-end gap-2 text-sm">
-          <button className="nav-btn" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-            上一页
-          </button>
-          <span className="text-muted-foreground">
-            {page} / {pageCount}
-          </span>
-          <button className="nav-btn" disabled={page >= pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))}>
-            下一页
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-2 text-sm">
+        <button
+          className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground disabled:opacity-50"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+        >
+          上一页
+        </button>
+        <span className="text-muted-foreground">
+          {page} / {pageCount}
+        </span>
+        <button
+          className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground disabled:opacity-50"
+          disabled={page >= pageCount}
+          onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+        >
+          下一页
+        </button>
       </div>
 
       {/* 变更历史抽屉 */}
       {historyTag !== null && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setHistoryTag(null)}>
+        <div className="fixed inset-0 z-40 flex justify-end" onClick={() => setHistoryTag(null)}>
+          <div className="absolute inset-0 bg-black/40" />
           <div
-            className="h-full w-full max-w-3xl overflow-y-auto border-l border-border bg-card p-4"
+            className="relative h-full w-full max-w-3xl overflow-y-auto border-l border-border-strong bg-card p-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">基线变更历史 · {historyTag}</h2>
-              <button className="nav-btn" onClick={() => setHistoryTag(null)}>
-                关闭
+              <h2 className="text-sm font-medium">基线变更历史 · {historyTag}</h2>
+              <button className="text-muted-foreground hover:text-foreground text-lg leading-none" onClick={() => setHistoryTag(null)}>
+                ×
               </button>
             </div>
             {historyLoading ? (
               <div className="py-8 text-center text-muted-foreground">加载中…</div>
             ) : (
-              <div className="overflow-x-auto rounded-md border border-border">
+              <div className="overflow-x-auto rounded border border-border">
                 <table className="w-full min-w-[720px] text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
@@ -404,8 +403,8 @@ export default function ExtremeBaselinePage() {
       {/* 人工修正弹层 */}
       {editRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setEditRow(null)}>
-          <div className="w-full max-w-md rounded-lg border border-border bg-card p-4" onClick={(e) => e.stopPropagation()}>
-            <h2 className="mb-2 text-base font-semibold">修正基线 · {editRow.sensor_tag}</h2>
+          <div className="w-full max-w-md rounded-lg border border-border-strong bg-card p-4" onClick={(e) => e.stopPropagation()}>
+            <h2 className="mb-2 text-sm font-medium">修正基线 · {editRow.sensor_tag}</h2>
             <p className="mb-3 text-xs text-muted-foreground">
               留空表示置空该方向（不参与极值检测）；最小值不得大于最大值。所有修正都会记入审计。
             </p>
@@ -414,27 +413,31 @@ export default function ExtremeBaselinePage() {
               value={editMin}
               onChange={(e) => setEditMin(e.target.value)}
               placeholder="数字，或留空=不限"
-              className="mb-3 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+              className="mb-3 w-full rounded border border-border-strong bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary"
             />
             <label className="mb-1 block text-xs text-muted-foreground">最大值 max</label>
             <input
               value={editMax}
               onChange={(e) => setEditMax(e.target.value)}
               placeholder="数字，或留空=不限"
-              className="mb-3 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+              className="mb-3 w-full rounded border border-border-strong bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary"
             />
             <label className="mb-1 block text-xs text-muted-foreground">原因</label>
             <input
               value={editReason}
               onChange={(e) => setEditReason(e.target.value)}
               placeholder="如：毛刺误推进，改回原区间"
-              className="mb-4 w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm outline-none focus:border-primary"
+              className="mb-4 w-full rounded border border-border-strong bg-background px-3 py-1.5 text-sm text-foreground outline-none focus:border-primary"
             />
             <div className="flex justify-end gap-2">
-              <button className="nav-btn" onClick={() => setEditRow(null)}>
+              <button className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground" onClick={() => setEditRow(null)}>
                 取消
               </button>
-              <button className="nav-btn" onClick={() => void submitEdit()} disabled={saving}>
+              <button
+                className="px-3 py-1.5 rounded text-sm border border-primary bg-primary/15 text-foreground disabled:opacity-60"
+                onClick={() => void submitEdit()}
+                disabled={saving}
+              >
                 {saving ? '保存中…' : '保存'}
               </button>
             </div>
@@ -444,18 +447,22 @@ export default function ExtremeBaselinePage() {
 
       {/* 最近突破事件 */}
       {eventsOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={() => setEventsOpen(false)}>
-          <div className="h-full w-full max-w-3xl overflow-y-auto border-l border-border bg-card p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-40 flex justify-end" onClick={() => setEventsOpen(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative h-full w-full max-w-3xl overflow-y-auto border-l border-border-strong bg-card p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">最近突破事件</h2>
-              <button className="nav-btn" onClick={() => setEventsOpen(false)}>
-                关闭
+              <h2 className="text-sm font-medium">最近突破事件</h2>
+              <button className="text-muted-foreground hover:text-foreground text-lg leading-none" onClick={() => setEventsOpen(false)}>
+                ×
               </button>
             </div>
             {eventsLoading ? (
               <div className="py-8 text-center text-muted-foreground">加载中…</div>
             ) : (
-              <div className="overflow-x-auto rounded-md border border-border">
+              <div className="overflow-x-auto rounded border border-border">
                 <table className="w-full min-w-[680px] text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">

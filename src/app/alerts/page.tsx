@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api-client';
 import { SensorPicker, type SensorOption } from '@/components/history/sensor-picker';
 import { ClosedLoopPanel } from '@/components/alerts/closed-loop-panel';
+import { ExtremeBaselinePanel } from '@/components/alerts/extreme-baseline-panel';
 import { ROOT_CAUSE_CATEGORIES } from '@/lib/handling-constants';
 import {
   ALERT_SEVERITIES,
@@ -81,7 +82,7 @@ const EMPTY_RULE: AlertRule = {
 };
 
 export default function AlertsPage() {
-  const [tab, setTab] = useState<'active' | 'history' | 'rules' | 'closedloop'>('active');
+  const [tab, setTab] = useState<'active' | 'history' | 'rules' | 'closedloop' | 'extreme'>('active');
   const [sourceFilter, setSourceFilter] = useState<'' | 'rule' | 'anomaly'>('');
   const [active, setActive] = useState<ActiveAlert[]>([]);
   const [items, setItems] = useState<AlertEventItem[]>([]);
@@ -277,7 +278,7 @@ export default function AlertsPage() {
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          {(['active', 'history', 'rules', 'closedloop'] as const).map((t) => (
+          {(['active', 'history', 'rules', 'closedloop', 'extreme'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -285,15 +286,9 @@ export default function AlertsPage() {
                 tab === t ? 'bg-primary/15 border-primary text-foreground' : 'border-border-strong text-muted-foreground hover:text-foreground'
               }`}
             >
-              {t === 'active' ? '活动告警' : t === 'history' ? '历史告警' : t === 'rules' ? '规则配置' : '闭环分析'}
+              {t === 'active' ? '活动告警' : t === 'history' ? '历史告警' : t === 'rules' ? '规则配置' : t === 'closedloop' ? '闭环分析' : '极值基线'}
             </button>
           ))}
-          <Link
-            href="/alerts/extreme"
-            className="px-3 py-1.5 rounded text-sm border border-border-strong text-muted-foreground hover:text-foreground transition-colors"
-          >
-            极值基线
-          </Link>
         </div>
       </header>
 
@@ -448,6 +443,8 @@ export default function AlertsPage() {
           </div>
         ) : tab === 'closedloop' ? (
           <ClosedLoopPanel />
+        ) : tab === 'extreme' ? (
+          <ExtremeBaselinePanel />
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
             {/* 规则编辑 */}
