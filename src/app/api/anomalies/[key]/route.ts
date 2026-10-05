@@ -4,7 +4,7 @@
 // 说明：处理记录统一由 alert_acks 承载（见 lib/alert-store.ts），首页与告警中心共用同一份闭环数据。
 
 import { NextResponse } from 'next/server';
-import { queryWithCache } from '@/lib/db';
+import { query, queryWithCache, toRows } from '@/lib/db';
 import { fetchMergedAcks } from '@/lib/acks';
 import { fetchAckTimeline, writeAlertAck } from '@/lib/alert-store';
 
@@ -14,7 +14,7 @@ function escapeSql(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "''");
 }
 
-async function loadItem(eventKey: string): Promise<Record<string, unknown> | null> {
+async function loadItem(eventKey: string, fresh = false): Promise<Record<string, unknown> | null> {
   const sql = `
     SELECT ts, event_key, sensor_tag, sensor_value, direction,
            baseline_min, baseline_max, device_id, kiln_id, report, note, analyzed_at
@@ -23,18 +23,22 @@ async function loadItem(eventKey: string): Promise<Record<string, unknown> | nul
     ORDER BY ts DESC
     LIMIT 1
   `;
-  const rows = await queryWithCache<Record<string, unknown>[]>(`anomaly:${eventKey}`, sql, 60000);
+  // fresh=1：绕过 60s 缓存直查（手动「重新分析」后轮询用，否则拿到的还是旧报告）
+  const rows = fresh
+    ? (toRows(await query(sql)) as unknown as Record<string, unknown>[])
+    : await queryWithCache<Record<string, unknown>[]>(`anomaly:${eventKey}`, sql, 60000);
   return rows.length > 0 ? rows[0] : null;
 }
 
-export async function GET(_req: Request, { params }: { params: Promise<{ key: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ key: string }> }) {
   const { key } = await params;
   const eventKey = decodeURIComponent(key || '');
   if (!eventKey || eventKey.length > 200) {
     return NextResponse.json({ success: false, error: 'invalid key' }, { status: 400 });
   }
+  const fresh = new URL(req.url).searchParams.get('fresh') === '1';
   try {
-    const item = await loadItem(eventKey);
+    const item = await loadItem(eventKey, fresh);
     if (!item) {
       return NextResponse.json({ success: false, error: 'not found' }, { status: 404 });
     }

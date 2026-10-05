@@ -77,7 +77,10 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
   const [saveMsg, setSaveMsg] = useState('');
   const [trendPoints, setTrendPoints] = useState<Array<{ ts: string; sensor_value: number }>>([]);
   const [reference, setReference] = useState<{ mn: number; mx: number; av: number } | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeMsg, setReanalyzeMsg] = useState('');
   const loadedHandlersRef = useRef(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 记住上次处理人，每次打开时预填，减少重复输入
   useEffect(() => {
@@ -120,6 +123,23 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
       setLoading(false);
     }
   }, [eventKey]);
+
+  // 切换/关闭抽屉时清理“重新分析”轮询与状态
+  useEffect(() => {
+    setReanalyzing(false);
+    setReanalyzeMsg('');
+    if (pollRef.current) {
+      clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+  }, [eventKey]);
+
+  useEffect(
+    () => () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!eventKey) {
@@ -210,6 +230,59 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
       setSaving(false);
     }
   };
+
+  // 触发一次后台「重新分析」：提交后轮询详情接口（fresh=1 绕过缓存）直到产出报告。
+  const triggerReanalyze = useCallback(async () => {
+    if (!eventKey || reanalyzing) return;
+    setReanalyzing(true);
+    setReanalyzeMsg('已提交重新分析，等待 Agent 产出…');
+    try {
+      const r = await fetch('/api/extreme/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_key: eventKey }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { success?: boolean; error?: string; detail?: string };
+      if (!r.ok || j.success === false) {
+        setReanalyzeMsg(`提交失败：${j.error || j.detail || `HTTP ${r.status}`}`);
+        setReanalyzing(false);
+        return;
+      }
+    } catch (e) {
+      setReanalyzeMsg(`提交失败：${String(e)}`);
+      setReanalyzing(false);
+      return;
+    }
+
+    const started = Date.now();
+    const MAX_MS = 10 * 60 * 1000;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/anomalies/${encodeURIComponent(eventKey)}?fresh=1`);
+        const j = await r.json();
+        const it = j?.item as Record<string, unknown> | undefined;
+        const rep = String(it?.report || '');
+        if (rep) {
+          setDetail(it as Record<string, unknown>);
+          setReanalyzing(false);
+          setReanalyzeMsg('分析完成');
+          return;
+        }
+        const note = String(it?.note || '');
+        if (Date.now() - started > MAX_MS) {
+          setReanalyzing(false);
+          setReanalyzeMsg(note ? `仍未产出报告：${note}` : '仍未产出报告，请稍后刷新');
+          return;
+        }
+        const secs = Math.floor((Date.now() - started) / 1000);
+        setReanalyzeMsg(`分析中，已等待 ${secs}s…${note ? `（上次：${note}）` : ''}`);
+        pollRef.current = setTimeout(() => void tick(), 5000);
+      } catch {
+        pollRef.current = setTimeout(() => void tick(), 8000);
+      }
+    };
+    pollRef.current = setTimeout(() => void tick(), 4000);
+  }, [eventKey, reanalyzing]);
 
   const direction = String(item?.direction || '');
   const isHigh = direction === 'NEW_HIGH';
@@ -546,11 +619,27 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                   <AnomalyMarkdown text={report} />
                 </div>
               ) : (
-                <div className="empty-state py-8" style={{ minHeight: 'auto' }}>
+                <div className="empty-state py-6" style={{ minHeight: 'auto' }}>
                   <span className="text-sm">暂无分析报告</span>
                   <span className="empty-hint">
                     {String(detail?.note || '分析生成中或当时未产出报告；稍后刷新可查看。')}
                   </span>
+                  <div className="mt-2 flex items-center gap-2 flex-wrap justify-center">
+                    <button
+                      type="button"
+                      onClick={() => void triggerReanalyze()}
+                      disabled={reanalyzing || !eventKey}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-xs border transition-colors disabled:opacity-60"
+                      style={{
+                        borderColor: 'var(--primary)',
+                        color: 'var(--primary)',
+                        background: 'color-mix(in srgb, var(--primary) 12%, transparent)',
+                      }}
+                    >
+                      {reanalyzing ? '分析中…' : '重新分析'}
+                    </button>
+                    {reanalyzeMsg && <span className="text-[11px] text-muted-foreground">{reanalyzeMsg}</span>}
+                  </div>
                 </div>
               )}
             </section>
