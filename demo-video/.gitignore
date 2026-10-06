@@ -1,0 +1,9 @@
+# 生成产物（可随时用 build.py 重建），不纳入版本库
+*.mp4
+*.webm
+*.mp3
+*.wav
+*.m4a
+demo.html
+timeline.json
+_pb.png

@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>窑炉传感器中控台 · 演示</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#121821; --panel2:#0f141c; --line:rgba(155,170,192,.14);
+    --fg:#e8edf4; --muted:#8b96a6; --dim:#5b6675;
+    --red:#ff4d5e; --blue:#4da3ff; --green:#35c28f; --amber:#f5a623; --cyan:#00d4ff;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{width:1920px; height:1080px; overflow:hidden; background:var(--bg);}
+  body{font-family:"Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",system-ui,sans-serif; color:var(--fg);}
+  .mono{font-family:"DejaVu Sans Mono","Noto Sans Mono",monospace; font-variant-numeric:tabular-nums;}
+
+  #stage{position:absolute; inset:0; width:1920px; height:1080px; overflow:hidden;}
+
+  /* ---------- shell ---------- */
+  .shell{position:absolute; inset:0; display:flex; flex-direction:column; opacity:0; transition:opacity .5s;}
+  .shell.on{opacity:1;}
+  .topbar{height:64px; flex:0 0 64px; display:flex; align-items:center; gap:28px;
+    padding:0 28px; border-bottom:1px solid var(--line); background:linear-gradient(180deg,#0e131b,#0b0e14);}
+  .brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:17px; letter-spacing:.5px;}
+  .brand .dot{width:10px; height:10px; border-radius:50%; background:var(--cyan); box-shadow:0 0 12px var(--cyan);}
+  .nav{display:flex; gap:6px; margin-left:8px;}
+  .nav span{font-size:13.5px; color:var(--muted); padding:7px 14px; border-radius:7px;}
+  .nav span.active{color:#fff; background:rgba(77,163,255,.16); box-shadow:inset 0 0 0 1px rgba(77,163,255,.35);}
+  .top-right{margin-left:auto; display:flex; align-items:center; gap:18px; font-size:12.5px; color:var(--muted);}
+  .live{display:flex; align-items:center; gap:7px; color:var(--green);}
+  .live i{width:8px; height:8px; border-radius:50%; background:var(--green); animation:pulse 1.6s infinite;}
+  @keyframes pulse{0%,100%{opacity:1; box-shadow:0 0 0 0 rgba(53,194,143,.5);}50%{opacity:.5; box-shadow:0 0 0 6px rgba(53,194,143,0);}}
+
+  .views{position:relative; flex:1; min-height:0;}
+  .view{position:absolute; inset:0; padding:18px 22px 26px; opacity:0; transition:opacity .4s; pointer-events:none;}
+  .view.on{opacity:1;}
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px 18px;}
+  .card h3{font-size:13px; font-weight:600; color:var(--muted); letter-spacing:.6px; margin-bottom:12px; display:flex; align-items:center; gap:8px;}
+  .card h3 .bar{width:3px; height:13px; background:var(--blue); border-radius:2px;}
+
+  /* dashboard */
+  .grid{display:grid; grid-template-columns:340px 1fr 380px; gap:16px; height:100%;}
+  .col{display:flex; flex-direction:column; gap:16px; min-height:0;}
+  .stats{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:16px;}
+  .stat{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 18px;}
+  .stat .k{font-size:12px; color:var(--muted);}
+  .stat .v{font-size:30px; font-weight:700; margin-top:6px; letter-spacing:.5px;}
+  .stat .v small{font-size:13px; color:var(--muted); font-weight:400; margin-left:5px;}
+  .stat.warn .v{color:var(--red);}
+  .kiln{display:flex; align-items:center; gap:16px; padding:10px 0; border-bottom:1px dashed rgba(155,170,192,.1);}
+  .kiln:last-child{border-bottom:0;}
+  .kiln .name{font-size:13px;}
+  .kiln .sub{font-size:11px; color:var(--dim); margin-top:3px;}
+  .badge{font-size:11px; padding:2px 9px; border-radius:20px; margin-left:auto;}
+  .b-ok{color:var(--green); background:rgba(53,194,143,.14);}
+  .b-warn{color:var(--amber); background:rgba(245,166,35,.14);}
+  .b-bad{color:var(--red); background:rgba(255,77,94,.16);}
+  .offitem{display:flex; align-items:center; gap:10px; padding:7px 0; font-size:12px; color:var(--muted);}
+  .offitem i{width:7px; height:7px; border-radius:50%; background:var(--red); opacity:.8;}
+  .offitem .tag{margin-left:auto; color:var(--dim); font-size:11px;}
+
+  /* anomaly list */
+  .alist{display:flex; flex-direction:column; gap:10px; overflow:hidden;}
+  .aitem{background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--red);
+    border-radius:8px; padding:12px 14px; opacity:0; transform:translateY(8px); transition:all .45s;}
+  .aitem.on{opacity:1; transform:none;}
+  .aitem .row1{display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;}
+  .aitem .row2{display:flex; align-items:center; gap:10px; margin-top:7px; font-size:11.5px; color:var(--muted);}
+  .aitem .val{margin-left:auto; font-size:17px; font-weight:700; color:var(--red);}
+  .aitem.hot{box-shadow:0 0 0 1px rgba(255,77,94,.5), 0 0 26px rgba(255,77,94,.22);}
+
+  /* alerts view */
+  .tabs{display:flex; gap:8px; margin-bottom:14px;}
+  .tabs span{font-size:13px; color:var(--muted); padding:7px 16px; border-radius:8px; border:1px solid transparent;}
+  .tabs span.active{color:#fff; background:rgba(255,77,94,.14); border-color:rgba(255,77,94,.4);}
+  table{width:100%; border-collapse:collapse; font-size:12.5px;}
+  thead th{text-align:left; font-weight:400; color:var(--muted); font-size:11.5px; padding:9px 12px; border-bottom:1px solid var(--line);}
+  tbody td{padding:11px 12px; border-bottom:1px solid rgba(155,170,192,.07);}
+  tr.hot{background:rgba(255,77,94,.1); box-shadow:inset 3px 0 0 var(--red);}
+  .pill{font-size:11px; padding:2px 9px; border-radius:20px;}
+
+  /* drawer */
+  .drawer{position:absolute; top:0; right:0; width:860px; height:1080px; background:#0f141c;
+    border-left:1px solid rgba(155,170,192,.2); box-shadow:-30px 0 60px rgba(0,0,0,.55);
+    transform:translateX(100%); transition:transform .55s cubic-bezier(.4,0,.2,1); padding:26px 34px; overflow:hidden; z-index:40;}
+  .drawer.on{transform:translateX(0);}
+  .dhead{display:flex; align-items:center; gap:12px; padding-bottom:16px; border-bottom:1px solid var(--line);}
+  .dhead .t{font-size:17px; font-weight:700;}
+  .dsec{margin-top:20px;}
+  .dsec>.k{font-size:11px; letter-spacing:1px; color:var(--dim); margin-bottom:10px;}
+  .dgrid{display:grid; grid-template-columns:1fr 1fr; gap:14px 26px; font-size:13px;}
+  .dgrid .lab{font-size:11px; color:var(--muted); margin-bottom:3px;}
+  .dgrid .big{font-size:19px; font-weight:700;}
+  .report{background:rgba(255,255,255,.02); border:1px solid var(--line); border-radius:9px; padding:16px 18px; font-size:13px; line-height:1.85;}
+  .report h4{font-size:13.5px; margin:12px 0 6px; color:var(--cyan);}
+  .report h4:first-child{margin-top:0;}
+  .report .warn{color:var(--amber); font-weight:700;}
+  .report .ok{color:var(--green); font-weight:700;}
+  .cursor{display:inline-block; width:8px; height:15px; background:var(--cyan); vertical-align:-2px; animation:blink .8s steps(1) infinite;}
+  @keyframes blink{50%{opacity:0;}}
+  .form{background:rgba(255,255,255,.02); border:1px solid var(--line); border-radius:9px; padding:14px 16px;}
+  .frow{display:flex; gap:14px; margin-bottom:11px;}
+  .fld{flex:1;}
+  .fld .lab{font-size:11px; color:var(--muted); margin-bottom:5px;}
+  .fld .box{background:#0b0f16; border:1px solid rgba(155,170,192,.22); border-radius:6px; padding:9px 11px; font-size:12.5px; min-height:38px; color:var(--fg);}
+  .fld .box.ph{color:var(--dim);}
+  .btn{display:inline-block; font-size:12.5px; padding:9px 16px; border-radius:7px; border:1px solid var(--line); color:var(--muted);}
+  .btn.ok{border-color:var(--green); color:var(--green); background:rgba(53,194,143,.12);}
+  .timeline{margin-top:16px;}
+  .tl-item{display:flex; gap:12px; font-size:12.5px; margin-bottom:12px; opacity:0; transform:translateX(-6px); transition:all .4s;}
+  .tl-item.on{opacity:1; transform:none;}
+  .tl-item .pt{width:9px; height:9px; border-radius:50%; margin-top:4px; background:var(--green); box-shadow:0 0 8px var(--green); flex:0 0 9px;}
+  .tl-item .meta{color:var(--muted); font-size:11.5px;}
+
+  /* process view */
+  .pfd{position:relative; height:100%;}
+  .pnode{position:absolute; background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:12px 16px; font-size:13px; opacity:0; transform:scale(.95); transition:all .5s;}
+  .pnode.on{opacity:1; transform:none;}
+  .pnode .tag{font-size:10.5px; color:var(--dim); margin-top:3px;}
+  .pnode .badge{position:absolute; top:-9px; right:-9px; margin:0;}
+  .arrow{position:absolute; height:2px; background:linear-gradient(90deg,rgba(77,163,255,.15),var(--blue)); opacity:0; transition:opacity .5s;}
+  .arrow.on{opacity:.75;}
+
+  /* reports */
+  .seg{display:flex; gap:8px;}
+  .seg span{font-size:12.5px; color:var(--muted); padding:7px 15px; border:1px solid var(--line); border-radius:7px;}
+  .seg span.active{color:#fff; background:rgba(77,163,255,.16); border-color:rgba(77,163,255,.45);}
+
+  /* chat */
+  .chat{position:absolute; left:50%; top:50%; width:1000px; transform:translate(-50%,-50%) scale(.96);
+    background:#0f141c; border:1px solid rgba(155,170,192,.2); border-radius:16px; padding:22px 26px;
+    box-shadow:0 30px 80px rgba(0,0,0,.6); opacity:0; transition:all .5s; z-index:60;}
+  .chat.on{opacity:1; transform:translate(-50%,-50%) scale(1);}
+  .bubble{max-width:78%; padding:12px 16px; border-radius:12px; font-size:13.5px; line-height:1.75; margin:12px 0; opacity:0; transform:translateY(6px); transition:all .45s;}
+  .bubble.on{opacity:1; transform:none;}
+  .bubble.user{margin-left:auto; background:rgba(77,163,255,.16); border:1px solid rgba(77,163,255,.35);}
+  .bubble.bot{background:rgba(255,255,255,.04); border:1px solid var(--line);}
+  .chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;}
+  .chip{font-size:11px; color:var(--cyan); border:1px solid rgba(0,212,255,.3); background:rgba(0,212,255,.08); padding:3px 9px; border-radius:20px;}
+  .dots span{display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--muted); margin-right:5px; animation:blink 1s infinite;}
+  .dots span:nth-child(2){animation-delay:.2s;} .dots span:nth-child(3){animation-delay:.4s;}
+  .wave{display:flex; align-items:flex-end; gap:4px; height:34px; margin:8px 0;}
+  .wave i{width:5px; background:var(--cyan); border-radius:3px; animation:wv .9s ease-in-out infinite;}
+  @keyframes wv{0%,100%{height:8px;}50%{height:32px;}}
+
+  /* full scenes */
+  .full{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(1200px 600px at 50% 40%, #131a25, #080a0f 70%); opacity:0; transition:opacity .6s; z-index:70;}
+  .full.on{opacity:1;}
+  .full .l1{font-size:30px; color:var(--muted); letter-spacing:3px;}
+  .full .l2{font-size:66px; font-weight:800; margin-top:18px; letter-spacing:2px;}
+  .full .l3{font-size:22px; color:var(--muted); margin-top:22px;}
+  .full .hl{color:var(--red);} .full .hlg{color:var(--green);} .full .hlb{color:var(--blue);}
+  .endcards{display:flex; gap:26px; margin-top:40px;}
+  .endcard{width:320px; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:26px 24px; text-align:center; opacity:0; transform:translateY(16px); transition:all .6s;}
+  .endcard.on{opacity:1; transform:none;}
+  .endcard .v{font-size:34px; font-weight:800; color:var(--cyan);}
+  .endcard .k{font-size:14px; color:var(--muted); margin-top:10px;}
+  .endtitle{font-size:46px; font-weight:800; margin-top:48px; opacity:0; transition:opacity .8s;}
+  .endtitle.on{opacity:1;}
+  .endsub{font-size:17px; color:var(--muted); margin-top:14px; opacity:0; transition:opacity .8s;}
+  .endsub.on{opacity:1;}
+
+  /* wechat */
+  .wechat{position:absolute; right:52px; bottom:-320px; width:440px; background:#fff; color:#111;
+    border-radius:16px; padding:16px 18px; box-shadow:0 24px 60px rgba(0,0,0,.55); transition:all .6s cubic-bezier(.4,0,.2,1); z-index:80;}
+  .wechat.on{bottom:56px;}
+  .wechat .whead{display:flex; align-items:center; gap:10px; padding-bottom:12px; border-bottom:1px solid #eee;}
+  .wechat .whead .ic{width:34px; height:34px; border-radius:8px; background:#38c05a; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:16px;}
+  .wechat .whead .nm{font-size:14px; font-weight:700;}
+  .wechat .whead .tm{font-size:11px; color:#999; margin-top:2px;}
+  .wechat .wbody{margin-top:12px; font-size:13.5px; line-height:1.8;}
+  .wechat .wbody .ttl{font-weight:800; color:#c0392b;}
+  .wechat .wrow{display:flex; justify-content:space-between; font-size:12.5px; color:#444; margin-top:4px;}
+  .wechat .wrow b{color:#111;}
+
+  /* hud */
+  #subtitle{position:absolute; left:50%; bottom:44px; transform:translateX(-50%); max-width:1500px; text-align:center;
+    font-size:23px; font-weight:600; color:#fff; text-shadow:0 2px 12px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.9);
+    background:rgba(6,9,14,.62); padding:10px 26px; border-radius:12px; z-index:100; line-height:1.5;}
+  #progress{position:absolute; left:0; top:0; width:1920px; height:4px; background:rgba(255,255,255,.06); z-index:110;}
+  #progressbar{height:100%; width:0; background:linear-gradient(90deg,var(--blue),var(--cyan));}
+  #clock{position:absolute; right:20px; bottom:14px; font-size:12px; color:var(--dim); z-index:100;}
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- ============ shell (dashboard / alerts / process / reports / history) ============ -->
+  <div class="shell" id="shell">
+    <div class="topbar">
+      <div class="brand"><span class="dot"></span>窑炉传感器中控台</div>
+      <div class="nav">
+        <span id="nav-home" class="active">首页</span>
+        <span id="nav-alerts">告警中心</span>
+        <span id="nav-process">工艺流程</span>
+        <span id="nav-reports">报表中心</span>
+        <span id="nav-tags">测点主数据</span>
+        <span id="nav-history">历史查询</span>
+      </div>
+      <div class="top-right">
+        <span class="live"><i></i>实时</span>
+        <span class="mono" id="topclock">2026-10-06 02:47:13</span>
+      </div>
+    </div>
+    <div class="views">
+
+      <!-- dashboard -->
+      <div class="view on" id="view-dashboard">
+        <div class="stats">
+          <div class="stat"><div class="k">在线测点</div><div class="v" data-count="273">0</div></div>
+          <div class="stat"><div class="k">实时数据点</div><div class="v" data-count="1096">0</div></div>
+          <div class="stat warn"><div class="k">今日极值异常</div><div class="v" data-count="2">0</div></div>
+          <div class="stat"><div class="k">离线测点</div><div class="v" data-count="3">0</div></div>
+        </div>
+        <div class="grid">
+          <div class="col">
+            <div class="card" style="flex:1">
+              <h3><span class="bar"></span>窑况总览</h3>
+              <div class="kiln"><div><div class="name">1#还原窑</div><div class="sub">窑体温度 847.90℃ · 正常</div></div><span class="badge b-ok">正常</span></div>
+              <div class="kiln"><div><div class="name">2#冷却器</div><div class="sub" id="kiln2-sub">出口温度 248.10℃ · 突破极值</div></div><span class="badge b-bad" id="kiln2-badge">异常</span></div>
+              <div class="kiln"><div><div class="name">2#回转窑</div><div class="sub">窑尾温度 812.40℃ · 正常</div></div><span class="badge b-ok">正常</span></div>
+              <div class="kiln"><div><div class="name">脱硫塔</div><div class="sub">出口 SO₂ 32.10mg/m³ · 正常</div></div><span class="badge b-ok">正常</span></div>
+            </div>
+            <div class="card" style="flex:0 0 250px">
+              <h3><span class="bar" style="background:var(--red)"></span>离线测点</h3>
+              <div class="offitem"><i></i>1#窑尾温度 TI_107<span class="tag">离线 42min</span></div>
+              <div class="offitem"><i></i>2#磨机振动 VIB_302<span class="tag">离线 18min</span></div>
+              <div class="offitem"><i></i>配料秤电流 CT_501<span class="tag">离线 9min</span></div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="card" style="flex:1">
+              <h3><span class="bar"></span>关键测点实时趋势</h3>
+              <svg id="mainchart" viewBox="0 0 900 560" width="100%" height="100%" preserveAspectRatio="none">
+                <g stroke="rgba(155,170,192,.10)" stroke-width="1">
+                  <line x1="0" y1="112" x2="900" y2="112"/><line x1="0" y1="224" x2="900" y2="224"/>
+                  <line x1="0" y1="336" x2="900" y2="336"/><line x1="0" y1="448" x2="900" y2="448"/>
+                </g>
+                <path id="line1" fill="none" stroke="#4da3ff" stroke-width="2.5" d=""/>
+                <path id="line2" fill="none" stroke="#35c28f" stroke-width="2" d="" opacity=".8"/>
+                <circle id="dot1" r="6" fill="#4da3ff"/>
+              </svg>
+            </div>
+          </div>
+          <div class="col">
+            <div class="card" style="flex:1">
+              <h3><span class="bar" style="background:var(--red)"></span>异常记录</h3>
+              <div class="alist" id="alist"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- alerts -->
+      <div class="view" id="view-alerts">
+        <div class="tabs">
+          <span class="active">活动告警</span><span>历史告警</span><span>规则配置</span><span>闭环分析</span><span>极值基线</span>
+        </div>
+        <div class="card" style="height:calc(100% - 60px); padding:6px 10px;">
+          <table>
+            <thead><tr><th>测点</th><th>方向</th><th>触发数值</th><th>历史区间</th><th>级别</th><th>时间</th><th>状态</th></tr></thead>
+            <tbody id="alertbody">
+              <tr><td>2#冷却器出口温度 TI_809</td><td>突破最高</td><td class="mono" style="color:var(--red);font-weight:700">248.10 ℃</td><td class="mono">0.00 ~ 229.20</td><td><span class="pill b-bad">danger</span></td><td class="mono">02:47:13</td><td>未处理</td></tr>
+              <tr><td>1#冷却器出口物料温度 TI209</td><td>突破最高</td><td class="mono" style="color:var(--red);font-weight:700">267.70 ℃</td><td class="mono">0.00 ~ 229.20</td><td><span class="pill b-bad">danger</span></td><td class="mono">昨日 14:52</td><td>已处理</td></tr>
+              <tr><td>1#窑布袋除尘进口温度 TI212</td><td>突破最高</td><td class="mono" style="color:var(--amber)">231.40 ℃</td><td class="mono">0.00 ~ 229.20</td><td><span class="pill b-warn">warning</span></td><td class="mono">昨日 15:26</td><td>已处理</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- process -->
+      <div class="view" id="view-process">
+        <div class="card" style="height:100%">
+          <h3><span class="bar"></span>工艺流程 · 工艺与异常联动</h3>
+          <div class="pfd">
+            <div class="pnode" id="p1" style="left:60px; top:120px">回转窑 R0202<div class="tag">煅烧 · 847.9℃</div><span class="badge b-ok">正常</span></div>
+            <div class="pnode" id="p2" style="left:420px; top:120px">回转滚筒冷却机 E0802<div class="tag">冷却 · 出口 248.1℃</div><span class="badge b-bad">近24h 2</span></div>
+            <div class="pnode" id="p3" style="left:800px; top:120px">布袋除尘<div class="tag">除尘 · 进口 231.4℃</div><span class="badge b-warn">近24h 1</span></div>
+            <div class="pnode" id="p4" style="left:1160px; top:120px">脱硫塔<div class="tag">脱硫 · SO₂ 32.1</div><span class="badge b-ok">正常</span></div>
+            <div class="pnode" id="p5" style="left:420px; top:360px">配料秤<div class="tag">配料 · 正常</div><span class="badge b-ok">正常</span></div>
+            <div class="pnode" id="p6" style="left:800px; top:360px">斗式提升机<div class="tag">输送 · 正常</div><span class="badge b-ok">正常</span></div>
+            <div class="arrow" id="a1" style="left:330px; top:150px; width:86px"></div>
+            <div class="arrow" id="a2" style="left:710px; top:150px; width:86px"></div>
+            <div class="arrow" id="a3" style="left:1090px; top:150px; width:66px"></div>
+            <div class="arrow" id="a4" style="left:440px; top:210px; width:2px; height:146px; background:linear-gradient(180deg,var(--blue),rgba(77,163,255,.15))"></div>
+            <div class="arrow" id="a5" style="left:820px; top:210px; width:2px; height:146px; background:linear-gradient(180deg,var(--blue),rgba(77,163,255,.15))"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- reports -->
+      <div class="view" id="view-reports">
+        <div style="display:flex; align-items:center; gap:16px; margin-bottom:14px;">
+          <div class="seg"><span>今日</span><span>昨日</span><span class="active">夜班</span><span>白班</span><span>近7天</span><span>自定义</span></div>
+          <span class="btn ok" style="margin-left:auto">导出 CSV</span>
+        </div>
+        <div class="card" style="height:calc(100% - 62px); padding:6px 10px;">
+          <table>
+            <thead><tr><th>测点</th><th>最小值</th><th>最大值</th><th>平均值</th><th>记录数</th><th>告警次数</th></tr></thead>
+            <tbody id="reportbody">
+              <tr><td>2#冷却器出口温度 TI_809</td><td class="mono">46.20</td><td class="mono" style="color:var(--red)">324.80</td><td class="mono">58.41</td><td class="mono">8640</td><td class="mono" style="color:var(--red)">2</td></tr>
+              <tr><td>1#窑体温度 TI_206F</td><td class="mono">812.30</td><td class="mono">873.60</td><td class="mono">847.92</td><td class="mono">8640</td><td class="mono">0</td></tr>
+              <tr><td>1#窑布袋除尘进口温度 TI212</td><td class="mono">118.40</td><td class="mono" style="color:var(--amber)">231.40</td><td class="mono">142.70</td><td class="mono">8640</td><td class="mono" style="color:var(--amber)">1</td></tr>
+              <tr><td>2#窑天然气调节阀 FV_803</td><td class="mono">12.00</td><td class="mono">100.00</td><td class="mono">61.35</td><td class="mono">8640</td><td class="mono">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- history -->
+      <div class="view" id="view-history">
+        <div style="display:flex; gap:14px; margin-bottom:14px;">
+          <span class="btn">测点：2#冷却器出口温度 TI_809 ▾</span>
+          <span class="btn">2026-10-05 16:00 ~ 17:00</span>
+          <span class="btn ok" style="margin-left:auto">查询</span>
+        </div>
+        <div class="card" style="height:calc(100% - 62px)">
+          <h3><span class="bar"></span>测点历史趋势</h3>
+          <svg viewBox="0 0 1700 720" width="100%" height="100%" preserveAspectRatio="none">
+            <g stroke="rgba(155,170,192,.10)"><line x1="0" y1="144" x2="1700" y2="144"/><line x1="0" y1="288" x2="1700" y2="288"/><line x1="0" y1="432" x2="1700" y2="432"/><line x1="0" y1="576" x2="1700" y2="576"/></g>
+            <path id="hline" fill="none" stroke="#ff4d5e" stroke-width="3.5" d="M0,650 L200,648 L400,645 L600,640 L700,630 L760,520 L820,300 L900,180 L980,220 L1100,260 L1250,300 L1450,330 L1700,345"/>
+            <circle cx="900" cy="180" r="8" fill="none" stroke="#ff4d5e" stroke-width="3"/>
+            <text x="915" y="170" fill="#ff4d5e" font-size="20">峰值 324.80℃</text>
+          </svg>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ drawer ============ -->
+  <div class="drawer" id="drawer">
+    <div class="dhead">
+      <span class="pill b-bad" style="font-size:12px">突破历史最高值</span>
+      <span class="t">2#冷却器出口温度 TI_809</span>
+      <span class="pill b-ok" id="acked" style="margin-left:auto; display:none">已处理</span>
+    </div>
+    <div class="dsec">
+      <div class="k">基本信息</div>
+      <div class="dgrid">
+        <div><div class="lab">触发时刻</div><div class="mono">2026-10-06 02:47:13</div></div>
+        <div><div class="lab">触发数值</div><div class="big mono" style="color:var(--red)">248.10 ℃</div></div>
+        <div><div class="lab">历史区间</div><div class="mono">0.00 ~ 229.20 ℃</div></div>
+        <div><div class="lab">设备 / 窑体</div><div>kiln_gateway · 2#</div></div>
+      </div>
+    </div>
+    <div class="dsec">
+      <div class="k">触发前后趋势（±30 分钟）</div>
+      <svg viewBox="0 0 800 150" width="100%" height="150">
+        <g stroke="rgba(155,170,192,.10)"><line x1="0" y1="45" x2="800" y2="45"/><line x1="0" y1="90" x2="800" y2="90"/></g>
+        <path id="dline" fill="none" stroke="#ff4d5e" stroke-width="2.5" d="M0,120 L120,118 L240,116 L360,112 L480,104 L560,96 L620,60 L680,26 L740,30 L800,38"/>
+        <line x1="480" y1="0" x2="480" y2="150" stroke="#ff4d5e" stroke-dasharray="5 5" stroke-width="1.5"/>
+        <text x="488" y="18" fill="#ff4d5e" font-size="12">触发</text>
+      </svg>
+    </div>
+    <div class="dsec" id="closedloop-sec">
+      <div class="k">处理闭环</div>
+      <div class="form">
+        <div class="frow">
+          <div class="fld"><div class="lab">处理人</div><div class="box ph" id="f-handler">姓名 / 工号</div></div>
+          <div class="fld"><div class="lab">根因分类</div><div class="box ph" id="f-cat">未分类</div></div>
+        </div>
+        <div class="fld" style="margin-bottom:11px"><div class="lab">处理措施</div><div class="box ph" id="f-measure">如：紧固接线并复测，观察 30 分钟</div></div>
+        <span class="btn ok" id="f-save">标记已处理</span>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+    <div class="dsec">
+      <div class="k">Agent 分析 · <span style="color:var(--cyan)">AI 生成</span></div>
+      <div class="report" id="report"></div>
+    </div>
+  </div>
+
+  <!-- ============ wechat ============ -->
+  <div class="wechat" id="wechat">
+    <div class="whead">
+      <div class="ic">企</div>
+      <div><div class="nm">窑炉监控告警群</div><div class="tm" id="wtm">02:47:15</div></div>
+    </div>
+    <div class="wbody">
+      <div class="ttl">⚠️ 突破历史极值 · 已检测到</div>
+      <div class="wrow"><span>测点</span><b>2#冷却器出口温度 TI_809</b></div>
+      <div class="wrow"><span>方向</span><b>突破历史最高值</b></div>
+      <div class="wrow"><span>当前值</span><b>248.10 ℃</b></div>
+      <div class="wrow"><span>历史区间</span><b>0.00 ~ 229.20 ℃</b></div>
+      <div style="margin-top:8px;color:#888;font-size:12px">Agent 正在分析，报告稍后推送…</div>
+    </div>
+  </div>
+
+  <!-- ============ chat ============ -->
+  <div class="chat" id="chat">
+    <div style="display:flex;align-items:center;gap:10px;padding-bottom:14px;border-bottom:1px solid var(--line)">
+      <span style="width:10px;height:10px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan)"></span>
+      <b style="font-size:15px">智能制造全链路 Agent</b>
+      <span style="margin-left:auto;font-size:12px;color:var(--dim)">知识库 · 工艺 · 实时数据</span>
+    </div>
+    <div id="chatbody">
+      <div class="bubble user" id="q1">回转窑结圈怎么处理？</div>
+      <div class="bubble bot" id="typing" style="width:90px"><span class="dots"><span></span><span></span><span></span></span></div>
+      <div class="bubble bot" id="a1">
+        结圈通常由<b>窑温偏高、生料成分波动、喂料不均</b>引起，建议按以下顺序处置：<br>
+        1. 适当降低窑尾温度，稳定热工制度；<br>
+        2. 调整喂料量与成分，避免大起大落；<br>
+        3. 结合窑主电机电流变化判断结圈位置，必要时停窑清理。
+        <div class="chips"><span class="chip">回转窑优化计划.md</span><span class="chip">SOP-A12</span><span class="chip">历史案例 3 条</span></div>
+      </div>
+      <div class="bubble user" id="q2" style="margin-top:18px">🎙 二号冷却器现在出口温度多少？</div>
+      <div class="wave" id="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="bubble bot" id="a2">二号冷却器出口温度当前 <b class="mono" style="color:var(--green)">49.40 ℃</b>，处于历史正常区间（0 ~ 229.20 ℃），已从凌晨的极值回落。</div>
+    </div>
+  </div>
+
+  <!-- ============ full scenes ============ -->
+  <div class="full" id="scene-hook">
+    <div class="l1">凌晨 2:47 · 窑炉现场</div>
+    <div class="l2">2#冷却器出口温度 <span class="hl">突破历史极值</span></div>
+    <div class="l3" id="hook-l3" style="opacity:0">没有人守在屏幕前 ……</div>
+  </div>
+
+  <div class="full" id="scene-end">
+    <div class="endcards">
+      <div class="endcard" id="ec1"><div class="v">秒级</div><div class="k">异常发现</div></div>
+      <div class="endcard" id="ec2"><div class="v">约 40 秒</div><div class="k">Agent 分析报告</div></div>
+      <div class="endcard" id="ec3"><div class="v">全程可追溯</div><div class="k">闭环处置</div></div>
+    </div>
+    <div class="endtitle" id="endtitle">窑炉传感器中控台</div>
+    <div class="endsub" id="endsub">发现 · 分析 · 闭环 · 沉淀</div>
+  </div>
+
+  <div id="subtitle"></div>
+  <div id="progress"><div id="progressbar"></div></div>
+  <div id="clock" class="mono"></div>
+</div>
+
+<script>
+const TL = __TIMELINE_JSON__;
+const S = TL.scenes;                 // [{key,start,dur,subs:[{t,d,text}]}]
+const TOTAL = TL.total;
+const $ = (s)=>document.querySelector(s);
+const $$ = (s)=>Array.from(document.querySelectorAll(s));
+const wait = (ms)=>new Promise(r=>setTimeout(r,ms));
+let t0 = null, curSub = '', fired = {};
+
+/* ---------- helpers ---------- */
+function setView(id){
+  $$('.view').forEach(v=>v.classList.toggle('on', v.id===id));
+  const map={'view-dashboard':'nav-home','view-alerts':'nav-alerts','view-process':'nav-process','view-reports':'nav-reports','view-history':'nav-history'};
+  $$('.nav span').forEach(n=>n.classList.remove('active'));
+  const nav=document.getElementById(map[id]); if(nav) nav.classList.add('active');
+}
+function countUp(el, to, dur){
+  const start=performance.now();
+  (function step(now){
+    const p=Math.min(1,(now-start)/dur); el.textContent=Math.round(to*p).toLocaleString();
+    if(p<1) requestAnimationFrame(step);
+  })(start);
+}
+function drawPath(id, d, dur){
+  const p=document.getElementById(id); if(!p) return;
+  p.setAttribute('d', d);
+  const len=p.getTotalLength();
+  p.style.strokeDasharray=len; p.style.strokeDashoffset=len;
+  p.getBoundingClientRect();
+  p.style.transition=`stroke-dashoffset ${dur}ms linear`; p.style.strokeDashoffset=0;
+}
+async function typeInto(el, text, speed=45){
+  el.classList.remove('ph'); el.textContent='';
+  for(const ch of text){ el.textContent+=ch; await wait(speed); }
+}
+function show(el,on=true){ const n=typeof el==='string'?$(el):el; if(n) n.classList.toggle('on',on); }
+
+/* ---------- scene animations ---------- */
+const ANIM = {
+  async hook(){
+    show('#scene-hook',true);
+    await wait(2600); $('#hook-l3').style.opacity='1';
+    await wait(3000); show('#wechat',true);
+    await wait(2400); $('#wtm').textContent='02:47:15';
+  },
+  async dashboard(){
+    show('#scene-hook',false); show('#wechat',false);
+    show('#shell',true); setView('view-dashboard');
+    await wait(300);
+    const pts1=[], pts2=[];
+    for(let i=0;i<=60;i++){ pts1.push([i*15, 300+Math.sin(i/5)*40+ (i>40?(i-40)*8:0)]); pts2.push([i*15, 380+Math.sin(i/7)*30]); }
+    const p1='M'+pts1.map(p=>p[0]+','+p[1].toFixed(1)).join(' L');
+    const p2='M'+pts2.map(p=>p[0]+','+p[1].toFixed(1)).join(' L');
+    drawPath('line1',p1,1800); drawPath('line2',p2,1800);
+    $$('.stat .v').forEach((el,i)=>{ const to=Number(el.dataset.count); setTimeout(()=>countUp(el,to,900), i*140); });
+    // anomaly list
+    const items=[
+      {tag:'2#冷却器出口温度 TI_809', dir:'突破历史最高值', val:'248.10 ℃', time:'02:47:13', hot:true},
+      {tag:'1#冷却器出口物料温度 TI209', dir:'突破历史最高值', val:'267.70 ℃', time:'昨日 14:52', hot:false},
+      {tag:'1#窑布袋除尘进口温度 TI212', dir:'突破历史最高值', val:'231.40 ℃', time:'昨日 15:26', hot:false},
+    ];
+    const box=$('#alist'); box.innerHTML='';
+    for(let i=0;i<items.length;i++){ const it=items[i];
+      const d=document.createElement('div'); d.className='aitem'+(it.hot?' hot':'');
+      d.innerHTML=`<div class="row1"><span class="pill b-bad">突破最高</span>${it.tag}</div>
+        <div class="row2">${it.dir} · ${it.time}<span class="val mono">${it.val}</span></div>`;
+      box.appendChild(d); await wait(500); d.classList.add('on'); await wait(500);
+    }
+    await wait(2200);
+  },
+  async alerts(){
+    setView('view-alerts');
+    await wait(1200);
+    const row=$('#alertbody').firstElementChild; row.classList.add('hot');
+    await wait(1200); show('#wechat',true);
+    $('#wtm').textContent='02:47:15';
+    await wait(3000);
+  },
+  async drawer(){
+    show('#wechat',false);
+    setView('view-dashboard'); show('#drawer',true);
+    const box=$('#report'); box.innerHTML='';
+    const secs=[
+      ['### 结论摘要', '该测点于 <span class="warn">02:47:13</span> 突破历史最高值（248.10℃），随后持续走高，峰值 <span class="warn">324.80℃</span>，为真实持续异常，非单点毛刺；目前<!-- --><span class="ok">已回落至 49.40℃</span>，恢复正常。'],
+      ['### 异常时段及数值说明', '16:44–16:50 高位运行 284.60 ~ 324.80℃，突破前历史区间 0 ~ 229.20℃。'],
+      ['### 可能原因', '冷却循环水回水温度、出口压力均正常，排除冷却水系统；结合故障影响链，指向<b>冷却机本体冷却失效</b>（冷却风/水量不足、E0802 异常）。'],
+      ['### 处理建议', '1. 立即核查冷却机运行状态与冷却水流量；2. 核对 TI_806F 窑温与联锁；3. 持续观察 30 分钟并记录复测值。'],
+      ['### 依据来源', 'TDengine 历史统计 · PFD 工艺文档 · 安全联锁表 · 故障影响链（E0802 · critical）。'],
+    ];
+    for(const [h,txt] of secs){
+      const h4=document.createElement('h4'); h4.textContent=h.replace('### ',''); box.appendChild(h4);
+      const p=document.createElement('div'); box.appendChild(p);
+      // typewriter
+      const plain=txt.replace(/<[^>]+>/g,'');
+      for(let i=0;i<plain.length;i+=2){ p.textContent=plain.slice(0,Math.min(plain.length,i+2)); await wait(10); }
+      p.innerHTML=txt; await wait(500);
+    }
+    await wait(2000);
+  },
+  async closedloop(){
+    await typeInto($('#f-handler'),'张工',70);
+    await wait(400); await typeInto($('#f-cat'),'仪表 / 测点异常',70);
+    await wait(400); await typeInto($('#f-measure'),'紧固接线并复测，观察 30 分钟',45);
+    await wait(700);
+    show('#acked',true); $('#f-save').textContent='已保存';
+    const tl=$('#timeline');
+    const d=document.createElement('div'); d.className='tl-item';
+    d.innerHTML=`<span class="pt"></span><div><div>已处理 · 张工 <span class="pill b-ok" style="font-size:10px">仪表 / 测点异常</span></div>
+      <div class="meta">措施：紧固接线并复测，观察 30 分钟 · 02:51:40</div></div>`;
+    tl.appendChild(d); await wait(500); d.classList.add('on');
+    await wait(2200);
+  },
+  async breadth(){
+    show('#drawer',false);
+    await wait(700); setView('view-process');
+    for(const id of ['p1','p2','p3','p4','p5','p6','a1','a2','a3','a4','a5']){ show('#'+id,true); await wait(140); }
+    await wait(4200); setView('view-reports'); await wait(5200);
+    setView('view-history'); await wait(4600);
+  },
+  async qa(){
+    setView('view-dashboard'); show('#chat',true);
+    await wait(1600); show('#q1',true);
+    await wait(1400); show('#typing',true);
+    await wait(1800); show('#typing',false); show('#a1',true);
+    await wait(5200); show('#q2',true);
+    await wait(1200); show('#wave',true);
+    await wait(2600); show('#wave',false); show('#a2',true);
+    await wait(3600); show('#chat',false);
+  },
+  async end(){
+    show('#shell',false); show('#chat',false); show('#scene-hook',false);
+    show('#scene-end',true);
+    await wait(600); show('#ec1',true); await wait(700); show('#ec2',true); await wait(700); show('#ec3',true);
+    await wait(900); show('#endtitle',true); $('#endtitle').classList.add('on');
+    await wait(500); show('#endsub',true);
+  },
+};
+
+/* ---------- master clock ---------- */
+function fmtClock(t){
+  const base=Date.parse('2026-10-06T02:47:13'); const d=new Date(base+t*1000);
+  const p=n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function updateSub(t){
+  let found='';
+  for(const s of S){
+    const rt=t-s.start;                       // 字幕时间是幕内相对时间，需减去幕起点
+    if(rt<0 || rt>=s.dur) continue;
+    for(const u of s.subs){ if(rt>=u.t && rt<u.t+u.d){ found=u.text; break; } }
+    if(found) break;
+  }
+  if(found!==curSub){ curSub=found; $('#subtitle').textContent=found; }
+}
+function frame(now){
+  if(t0===null) t0=now;
+  const t=(now-t0)/1000;
+  $('#progressbar').style.width=Math.min(100,t/TOTAL*100)+'%';
+  $('#clock').textContent=`${t.toFixed(1)}s / ${TOTAL.toFixed(0)}s`;
+  $('#topclock').textContent=fmtClock(t);
+  updateSub(t);
+  for(const s of S){ if(!fired[s.key] && t>=s.start){ fired[s.key]=true; (ANIM[s.key]||(async()=>{}))().catch(e=>console.error(e)); } }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
