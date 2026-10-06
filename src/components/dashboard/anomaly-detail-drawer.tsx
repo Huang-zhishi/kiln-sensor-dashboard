@@ -5,7 +5,9 @@ import Link from 'next/link';
 import type { EChartsOption } from 'echarts';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { EChart } from '@/components/charts/echarts';
+import { Sparkles } from 'lucide-react';
 import { AnomalyMarkdown } from './anomaly-markdown';
+import { openAssistant } from '@/components/ai/ai-assistant';
 import { classifySensor, UNIT_MAP } from '@/lib/sensor-classifier';
 import { ROOT_CAUSE_CATEGORIES, categoryLabel, categoryColor } from '@/lib/handling-constants';
 import type { AnomalyItem } from './anomaly-list';
@@ -667,6 +669,30 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                   复制报告
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => {
+                  const ctx = [
+                    `异常事件：${sensorTag}`,
+                    `方向：${DIRECTION_LABEL[direction] || direction}`,
+                    `触发时刻：${eventTs}`,
+                    `触发数值：${num(item?.sensor_value)} ${unit}`,
+                    `历史区间：${num(item?.baseline_min)} ~ ${num(item?.baseline_max)} ${unit}`,
+                    report
+                      ? `已有分析报告：\n${report.slice(0, 1200)}`
+                      : detail?.note
+                        ? `备注：${String(detail.note)}`
+                        : '',
+                  ]
+                    .filter(Boolean)
+                    .join('\n');
+                  openAssistant({ context: ctx, prompt: '结合这条异常，帮我分析可能原因和处置建议。' });
+                }}
+                className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border transition-colors"
+                style={{ borderColor: 'var(--primary)', color: 'var(--primary)', background: 'color-mix(in srgb, var(--primary) 10%, transparent)' }}
+              >
+                <Sparkles size={13} /> 问 AI 助手
+              </button>
               {agentChatUrl && (
                 <a
                   href={agentChatUrl}
@@ -674,7 +700,7 @@ export function AnomalyDetailDrawer({ eventKey, summary, onClose, onStatusChange
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-xs border border-border-strong bg-card hover:bg-card-hover transition-colors"
                 >
-                  问 Agent
+                  完整对话台
                 </a>
               )}
             </section>

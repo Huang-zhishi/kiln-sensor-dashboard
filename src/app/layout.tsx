@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { AiAssistant } from '@/components/ai/ai-assistant';
 
 export const metadata: Metadata = {
   title: '传感器数据大屏 | 工业监控系统',
@@ -33,6 +34,8 @@ export default function RootLayout({
           />
         ) : null}
         {children}
+        {/* 全局 AI 助手：抽屉 + 悬浮入口，全站可用 */}
+        <AiAssistant />
       </body>
     </html>
   );

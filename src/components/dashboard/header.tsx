@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { Sparkles } from 'lucide-react';
+import { openAssistant } from '@/components/ai/ai-assistant';
 
 interface HeaderProps {
   lastUpdate: Date;
@@ -87,6 +89,14 @@ export function DashboardHeader({ lastUpdate, onRefresh, loading, connected = tr
           <Link href="/history" className="nav-btn font-medium">
             历史查询
           </Link>
+          <button
+            onClick={() => openAssistant()}
+            className="nav-btn font-medium inline-flex items-center gap-1.5"
+            style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}
+            title="打开 AI 助手"
+          >
+            <Sparkles size={13} /> AI 助手
+          </button>
           <button
             onClick={onRefresh}
             disabled={loading}
